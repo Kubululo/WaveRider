@@ -1,0 +1,65 @@
+# Dependabot configuration — https://docs.github.com/code-security/dependabot
+version: 2
+
+updates:
+  # ---------------------------------------------------------------------------
+  # npm dependencies
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Bratislava
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+    # Conventional Commits (see CONTRIBUTING.md): chore(deps): ...
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      # Bundle routine prod/dev minor + patch bumps into one PR each to reduce
+      # noise. three.js is excluded so it always lands in its own PR (see below).
+      production:
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
+        exclude-patterns:
+          - three
+          - "@types/three"
+      development:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # three.js relies on internal GLSL hook points (#include <begin_vertex>,
+      # #include <opaque_fragment>) that the hand-tuned shaders in
+      # sceneGenerator.ts patch. Major bumps can rename/remove them and silently
+      # break the scene, so block auto-major and review those upgrades by hand.
+      # Excluded from the group above => minor/patch arrive as isolated,
+      # easy-to-test PRs.
+      - dependency-name: three
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/three"
+        update-types: ["version-update:semver-major"]
+
+  # ---------------------------------------------------------------------------
+  # GitHub Actions (no-op until workflows exist under .github/workflows)
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Bratislava
+    labels:
+      - dependencies
+      - github-actions
+    commit-message:
+      prefix: ci
+      include: scope
