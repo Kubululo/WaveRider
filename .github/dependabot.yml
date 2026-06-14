@@ -13,8 +13,6 @@ updates:
       time: "06:00"
       timezone: Europe/Bratislava
     open-pull-requests-limit: 10
-    labels:
-      - dependencies
     # Conventional Commits (see CONTRIBUTING.md): chore(deps): ...
     commit-message:
       prefix: chore
@@ -57,9 +55,6 @@ updates:
       day: monday
       time: "06:00"
       timezone: Europe/Bratislava
-    labels:
-      - dependencies
-      - github-actions
     commit-message:
       prefix: ci
       include: scope
