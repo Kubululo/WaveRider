@@ -1,0 +1,34 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="WaveRider">
+  <defs>
+    <!-- Sun gradient, lifted from the banner: gold → orange → pink → magenta -->
+    <linearGradient id="fav-sun" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0"    stop-color="#fef08a"/>
+      <stop offset="0.42" stop-color="#fb923c"/>
+      <stop offset="0.72" stop-color="#ff2d78"/>
+      <stop offset="1"    stop-color="#b01a86"/>
+    </linearGradient>
+    <radialGradient id="fav-halo" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ff2d78" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#ff2d78" stop-opacity="0"/>
+    </radialGradient>
+    <!-- Retrowave horizon slats: solid upper half, then thinning lines toward the base -->
+    <mask id="fav-sunmask">
+      <rect x="0" y="0"  width="100" height="100" fill="black"/>
+      <rect x="0" y="0"  width="100" height="50"  fill="white"/>
+      <rect x="0" y="52"   width="100" height="3.8" fill="white"/>
+      <rect x="0" y="58.5" width="100" height="3"   fill="white"/>
+      <rect x="0" y="65.5" width="100" height="2.4" fill="white"/>
+      <rect x="0" y="72.5" width="100" height="1.8" fill="white"/>
+      <rect x="0" y="78"   width="100" height="1.3" fill="white"/>
+    </mask>
+  </defs>
+
+  <!-- Dark rounded backdrop so the sun stays visible on any browser tab theme -->
+  <rect x="0" y="0" width="100" height="100" rx="22" fill="#0a0420"/>
+
+  <!-- Halo glow -->
+  <ellipse cx="50" cy="49" rx="46" ry="40" fill="url(#fav-halo)"/>
+
+  <!-- Sun with retrowave slat cutouts -->
+  <circle cx="50" cy="47" r="34" fill="url(#fav-sun)" mask="url(#fav-sunmask)"/>
+</svg>
