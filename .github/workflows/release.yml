@@ -1,0 +1,108 @@
+name: Release
+
+# Cut a release manually from the Actions tab. The workflow bumps the version
+# with `npm version` (which writes package.json + lockfile, commits, and creates
+# the vX.Y.Z tag), pushes the commit and tag back, then builds the game, bundles
+# it with a local launcher, and attaches the zip to a GitHub Release.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Semver bump for npm version"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+        default: minor
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Persist an admin PAT so the version-bump commit + tag are pushed as a
+          # repository admin and bypass branch protection. The default
+          # GITHUB_TOKEN / github-actions[bot] cannot be a bypass actor.
+          # Requires repo secret RELEASE_TOKEN: a fine-grained PAT with
+          # Contents: write on this repo, owned by a user the ruleset's
+          # "Repository admin" bypass covers.
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify (typecheck, lint, test)
+        run: npm run check
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version and create tag
+        id: bump
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+          case "$BUMP" in
+            patch|minor|major) ;;
+            *) echo "::error::Invalid bump '$BUMP'"; exit 1 ;;
+          esac
+          # npm version writes package.json + package-lock.json, commits, and
+          # tags vX.Y.Z; its stdout is the new tag (e.g. v1.1.0).
+          NEW_TAG="$(npm version "$BUMP" -m "chore(release): %s")"
+          echo "tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Push commit and tag
+        env:
+          BRANCH: ${{ github.ref_name }}
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git push origin "HEAD:$BRANCH"
+          git push origin "refs/tags/$TAG"
+
+      - name: Build
+        run: npm run build
+
+      - name: Assemble release package
+        id: package
+        env:
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          set -euo pipefail
+          PKG="waverider-$TAG"
+          mkdir -p "staging/$PKG/app"
+          cp -r dist/. "staging/$PKG/app/"
+          cp packaging/README.txt "staging/$PKG/README.txt"
+          cp packaging/start-windows.bat "staging/$PKG/start-windows.bat"
+          cp packaging/start-macos-linux.sh "staging/$PKG/start-macos-linux.sh"
+          chmod +x "staging/$PKG/start-macos-linux.sh"
+          (cd staging && zip -r "../$PKG.zip" "$PKG")
+          echo "zip=$PKG.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.bump.outputs.tag }}
+          name: WaveRider ${{ steps.bump.outputs.tag }}
+          generate_release_notes: true
+          files: ${{ steps.package.outputs.zip }}
