@@ -55,6 +55,11 @@ import type { TrackSegment } from './types'
 // --- Constants ---
 export const LANE_WIDTH = 3
 
+// Upper bound on the render supersampling scale (see the constructor's
+// setPixelRatio call). Guards against a stray preset/override allocating a
+// runaway framebuffer (cost grows with the square of the scale).
+const MAX_RENDER_SCALE = 4
+
 // --- Types & Interfaces ---
 
 type SvgFileConfig = [string, number, number, number, number, string]
@@ -87,15 +92,21 @@ export interface SceneSettings {
 export class RetrowaveScene {
   public static readonly defaultSettings: SceneSettings = {
     renderDistance: 2000,
-    pixelRatio: 1,
+    // Supersampling factor: the scene renders at this multiple of the CSS
+    // resolution and downscales (SSAA). This is what tames the scrolling neon
+    // grid's moiré — the grid is a fragment-shader pattern, so resolution is the
+    // only lever that smooths its interior (edge-based SMAA can't). Heaviest
+    // preset; tuned for crisp visuals and video capture on a 1× display. Cost
+    // scales with the square of this value and it's clamped to MAX_RENDER_SCALE.
+    pixelRatio: 2,
     planeSize: 300,
     palmCount: 40,
-    palmSpacing: 40,
-    pyramidCount: 20,
-    pyramidInstances: 8,
+    palmSpacing: 15,
+    pyramidCount: 120,
+    pyramidInstances: 15,
     bloomEnabled: true,
     scanlineEnabled: true,
-    scanlineOpacity: 0.05,
+    scanlineOpacity: 0.01,
   }
 
   public static readonly qualityPresets: Record<string, SceneSettings> = {
@@ -135,7 +146,7 @@ export class RetrowaveScene {
 
   public settings: SceneSettings
   public scenePath: string
-  public textureResolution: number = 2048
+  public textureResolution: number = 4096
   public svgFiles: SvgFileConfig[]
   public skybox: string[]
   public positionHistory: PositionHistoryItem[] = []
@@ -192,7 +203,14 @@ export class RetrowaveScene {
     ]
 
     this.renderer = new WebGLRenderer({ antialias: true, powerPreference: 'high-performance' })
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.settings.pixelRatio))
+    // pixelRatio is an ABSOLUTE supersampling scale (CSS px → render px), not a
+    // cap on the display's devicePixelRatio. Treating it as a cap meant the high
+    // preset rendered at 1× CSS resolution on a standard 1× monitor — no
+    // oversampling — which is what let the neon grid shimmer/moiré through. As an
+    // absolute scale, high renders the scene above 1× and downscales (SSAA),
+    // smoothing the grid even where the display has no extra pixels to spare.
+    // Clamped to MAX_RENDER_SCALE so an extreme value can't blow up the framebuffer.
+    this.renderer.setPixelRatio(Math.min(this.settings.pixelRatio, MAX_RENDER_SCALE))
     this.renderer.setSize(window.innerWidth, window.innerHeight)
     this.renderer.outputColorSpace = SRGBColorSpace
     this.renderer.domElement.id = 'retrowaveScene'
@@ -204,10 +222,11 @@ export class RetrowaveScene {
     // produce moiré with the 3D grid lines. The div layer is fully decoupled from
     // the 3D pipeline and never interferes with it.
     if (this.settings.scanlineEnabled) {
-      this.scanlineOverlay = document.createElement('div')
-      this.scanlineOverlay.style.cssText = `position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1;background:repeating-linear-gradient(to bottom,transparent 0px,transparent 3px,rgba(0,0,0,${this.settings.scanlineOpacity}) 3px,rgba(0,0,0,${this.settings.scanlineOpacity}) 4px)`
+      const overlay = document.createElement('div')
+      overlay.style.cssText = `position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1;background:repeating-linear-gradient(to bottom,transparent 0px,transparent 3px,rgba(0,0,0,${this.settings.scanlineOpacity}) 3px,rgba(0,0,0,${this.settings.scanlineOpacity}) 4px)`
       parent.style.position = parent.style.position || 'relative'
-      parent.appendChild(this.scanlineOverlay)
+      parent.appendChild(overlay)
+      this.scanlineOverlay = overlay
     }
 
     this.scene = new Scene()
@@ -256,10 +275,7 @@ export class RetrowaveScene {
     this.renderer.toneMappingExposure = 1.0
 
     if (this.settings.bloomEnabled) {
-      // Dual bloom: softBloom lifts the whole scene subtly; sunBloom's threshold
-      // of 1.5 only catches untonemapped HDR values — the sun color is boosted to
-      // 4× in loadSvgGraphics specifically to clear that threshold while nothing
-      // else in the scene does.
+      // softBloom lifts the whole scene subtly.
       const softBloom = new UnrealBloomPass(
         new Vector2(window.innerWidth, window.innerHeight),
         0.2,
@@ -268,13 +284,13 @@ export class RetrowaveScene {
       )
       this.composer.addPass(softBloom)
 
-      const sunBloom = new UnrealBloomPass(
-        new Vector2(window.innerWidth, window.innerHeight),
-        0.6,
-        0.5,
-        1.5
-      )
-      this.composer.addPass(sunBloom)
+      // sunBloom (disabled): a second, high-threshold (1.5) pass that only
+      // catches untonemapped HDR values — the sun color is boosted 4× in
+      // loadSvgGraphics specifically to clear it while nothing else does. Left
+      // off to keep the captured footage clean; re-enable for the fuller look:
+      //   const sunBloom = new UnrealBloomPass(
+      //     new Vector2(window.innerWidth, window.innerHeight), 0.6, 0.5, 1.5)
+      //   this.composer.addPass(sunBloom)
     }
 
     this.glitchPass = new GlitchPass()
@@ -284,6 +300,12 @@ export class RetrowaveScene {
     // OutputPass converts linear HDR → sRGB for display. Must be last: any pass
     // after it operates on already-tonemapped values and produces wrong results.
     this.composer.addPass(new OutputPass())
+
+    // addPass() doesn't size a pass — bloom/SMAA were built at CSS resolution.
+    // setSize multiplies by the composer's pixelRatio (= the renderer's
+    // supersampling scale), so every pass runs at the full supersampled
+    // resolution too, not just the scene render target.
+    this.composer.setSize(window.innerWidth, window.innerHeight)
   }
 
   public addFloor() {
@@ -437,11 +459,11 @@ export class RetrowaveScene {
     instGeo.instanceCount = this.settings.palmCount
 
     const mat = new MeshBasicMaterial({
-      color: 0x056023,
+      color: 0x01872d,
       side: DoubleSide,
       wireframe: true,
       transparent: true,
-      opacity: 0.3,
+      opacity: 0.2,
     })
     mat.onBeforeCompile = (s) =>
       this.prepareShader(s as ThreeShader, 600, 500, '1.0', '0.8', true, true)

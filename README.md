@@ -43,9 +43,9 @@ npm run preview # preview the production build
 
 ### Quality Settings
 
-- **Low** — no bloom or scanlines, reduced pixel ratio and draw distance; best for weak devices.
-- **Medium** — bloom + scanlines, full pixel ratio.
-- **High** — full post-processing, maximum scene density and draw distance.
+- **Low** — no bloom or scanlines, 0.65× render scale and reduced draw distance; best for weak devices.
+- **Medium** — bloom + scanlines, 1× render scale.
+- **High** — full post-processing, maximum scene density and draw distance, and supersampling (renders above native resolution and downscales) to eliminate the neon grid's moiré shimmer. Scanlines are off here so they don't beat against a recorder's pixel grid. Best for crisp visuals and video capture; heaviest on the GPU.
 
 ## Project Structure
 
@@ -123,7 +123,7 @@ Track bump heights, cooldowns, and road curvature are in `GENERATOR_CONFIG` at t
 Replace the PNG and SVG files inside `public/assets/retrowave/`. The skybox expects six faces:
 `px.png`, `nx.png`, `py.png`, `nz.png`, and `invisible.png` (reused for both the bottom −Y face and the +Z face behind
 the camera).
-Three resolution sets are pre-built (`1024`, `2048`, `4096`); the scene always loads the `2048` set.
+Three resolution sets are pre-built (`1024`, `2048`, `4096`); the scene always loads the `4096` set.
 
 ## Author
 

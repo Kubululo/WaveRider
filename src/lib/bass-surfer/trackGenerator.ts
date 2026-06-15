@@ -23,7 +23,7 @@ const GENERATOR_CONFIG = {
   INTENSITY: {
     BASS: 4,
     MID: 3,
-    HIGH: 3,
+    HIGH: 2,
   },
 
   // 3. Cooldowns (in Milliseconds)
@@ -33,12 +33,12 @@ const GENERATOR_CONFIG = {
     BASS_TRIGGER: {
       BLOCK_BASS: 300,
       BLOCK_MID: 800,
-      BLOCK_HIGH: 500,
+      BLOCK_HIGH: 300,
     },
     MID_TRIGGER: {
       BLOCK_BASS: 400,
       BLOCK_MID: 450,
-      BLOCK_HIGH: 500,
+      BLOCK_HIGH: 200,
     },
     HIGH_TRIGGER: {
       BLOCK_BASS: 400,
@@ -90,7 +90,7 @@ const GENERATOR_CONFIG = {
     WORLD_SPEED: 30, // Forward world units/sec — must match RetrowaveScene.animationSpeed
     // Superelevation: the road surface rolls into curves like a bullet train,
     // proportional to the current heading, easing in/out via the EMA.
-    BANK_MAX_DEG: 4, // Maximum lean of the road surface
+    BANK_MAX_DEG: 6, // Maximum lean of the road surface
     // Heading fraction (of STEER_ANGLE) at which the bank saturates. The
     // spring system means heading peaks mid-transition at roughly half the
     // steer angle and decays to ~0 once a curve settles — normalizing by the
