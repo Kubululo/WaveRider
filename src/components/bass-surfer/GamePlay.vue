@@ -72,6 +72,8 @@ let audioCtx: AudioContext | null = null
 let sourceNode: AudioBufferSourceNode | null = null
 let startTime = 0
 let lastProgress = 0
+// Scroll distance (world units) resolved last frame, for swept orb collision.
+let lastScrollOffset = 0
 let playerPitch = 0
 let playerYaw = 0
 let rafId = 0
@@ -263,28 +265,39 @@ function tick() {
     const collectibles = sceneManager.getCollectibles()
     const playerZ = sceneManager.playerGroup!.position.z
 
+    // Swept collision: an orb sits at z = baseZ + scrollOffset, and scrollOffset
+    // grows monotonically with the audio clock (= elapsed × animationSpeed). Each
+    // orb crosses the player plane (dz = 0) at exactly scrollOffset = playerZ -
+    // baseZ. Resolving on that crossing — instead of testing presence in a fixed
+    // ±2 window each frame — means a dropped/long frame that jumps the orb clean
+    // past the window can't cause a phantom miss. Frame-rate independent.
+    const scrollOffset = elapsed * sceneManager.animationSpeed
+
     for (let i = 0; i < collectibles.length; i++) {
       const c = collectibles[i]
       if (!c.alive) continue
 
-      const dz = c.mesh.position.z - playerZ
-
-      if (Math.abs(dz) < 2.0 && c.lane === currentLane.value) {
+      const crossOffset = playerZ - c.baseZ
+      // Did the orb pass the player plane somewhere between last frame and now?
+      if (crossOffset > lastScrollOffset && crossOffset <= scrollOffset) {
         sceneManager.removeCollectible(i)
-        score.value.collectiblesHit++
-        score.value.combo++
-        if (score.value.combo > score.value.maxCombo) {
-          score.value.maxCombo = score.value.combo
+        if (c.lane === currentLane.value) {
+          score.value.collectiblesHit++
+          score.value.combo++
+          if (score.value.combo > score.value.maxCombo) {
+            score.value.maxCombo = score.value.combo
+          }
+          score.value.multiplier = 1 + Math.floor(score.value.combo / 10)
+          score.value.score += 100 * score.value.multiplier
+          displayScore.value = score.value.score
+        } else {
+          score.value.combo = 0
+          score.value.multiplier = 1
         }
-        score.value.multiplier = 1 + Math.floor(score.value.combo / 10)
-        score.value.score += 100 * score.value.multiplier
-        displayScore.value = score.value.score
-      } else if (dz > 2.0) {
-        sceneManager.removeCollectible(i)
-        score.value.combo = 0
-        score.value.multiplier = 1
       }
     }
+
+    lastScrollOffset = scrollOffset
   }
 
   sceneManager.renderFrame()
@@ -322,6 +335,7 @@ async function startGame() {
 
   startTime = audioCtx.currentTime + 0.1
   lastProgress = 0
+  lastScrollOffset = 0
   sourceNode.start(startTime)
 
   sourceNode.onended = () => {
