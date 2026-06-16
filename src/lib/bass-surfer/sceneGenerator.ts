@@ -98,7 +98,7 @@ export class RetrowaveScene {
     // only lever that smooths its interior (edge-based SMAA can't). Heaviest
     // preset; tuned for crisp visuals and video capture on a 1× display. Cost
     // scales with the square of this value and it's clamped to MAX_RENDER_SCALE.
-    pixelRatio: 2,
+    pixelRatio: 1,
     planeSize: 300,
     palmCount: 40,
     palmSpacing: 15,
