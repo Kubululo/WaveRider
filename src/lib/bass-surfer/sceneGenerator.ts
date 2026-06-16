@@ -9,7 +9,6 @@ import {
   BufferAttribute,
   CircleGeometry,
   ClampToEdgeWrapping,
-  Clock,
   Color,
   ConeGeometry,
   CubeTextureLoader,
@@ -34,6 +33,7 @@ import {
   Shape,
   ShapeGeometry,
   SRGBColorSpace,
+  Timer,
   Vector2,
   Vector3,
   WebGLRenderer,
@@ -168,7 +168,9 @@ export class RetrowaveScene {
   public renderer: WebGLRenderer
   public scene: Scene
   public camera: PerspectiveCamera
-  public clock: Clock = new Clock()
+  // Timer replaces the deprecated THREE.Clock. Call update() once per frame
+  // before reading getDelta() (see animate()).
+  public clock: Timer = new Timer()
   public mouse: Vector2 = new Vector2()
   public target: Vector2 = new Vector2()
   public composer!: EffectComposer
@@ -1015,6 +1017,7 @@ export class RetrowaveScene {
   public animate = () => {
     if (!this.renderer) return
     requestAnimationFrame(this.animate)
+    this.clock.update()
     this.time += this.clock.getDelta()
     this.renderFrame()
   }

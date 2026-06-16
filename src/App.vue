@@ -5,23 +5,27 @@ import { useAudioAnalyzer, type AudioAnalysis } from '~/composables/useAudioAnal
 import { generateTrack } from '~/lib/bass-surfer/trackGenerator'
 import type { TrackData } from '~/lib/bass-surfer/types'
 import SongSelector from '~/components/bass-surfer/SongSelector.vue'
+import MusicBrowser from '~/components/bass-surfer/MusicBrowser.vue'
 import AnalysisLoader from '~/components/bass-surfer/AnalysisLoader.vue'
 import GamePlay from '~/components/bass-surfer/GamePlay.vue'
+import QualityMenu from '~/components/bass-surfer/QualityMenu.vue'
 
 type Screen = 'home' | 'analyzing' | 'game'
+type SongSource = 'upload' | 'browse'
 
 const store = useBassSurferStore()
 const analyzer = useAudioAnalyzer()
 
 const screen = ref<Screen>('home')
+const songSource = ref<SongSource>('browse')
 const songTitle = ref('Unknown')
 const trackData = shallowRef<TrackData | null>(null)
 const audioBuffer = shallowRef<AudioBuffer | null>(null)
 const audioAnalysis = shallowRef<AudioAnalysis | null>(null)
-const quality = computed(() => store.quality)
+const sceneSettings = computed(() => store.activeSettings)
 
-async function handleFileSelect(file: File) {
-  songTitle.value = file.name.replace(/\.[^/.]+$/, '')
+async function handleFileSelect(file: File, title?: string) {
+  songTitle.value = title ?? file.name.replace(/\.[^/.]+$/, '')
   screen.value = 'analyzing'
 
   try {
@@ -78,54 +82,30 @@ onUnmounted(() => {
         </div>
 
         <!-- Quality + Zen controls -->
-        <div class="flex flex-wrap items-center justify-center gap-x-6 gap-y-3 mb-8">
-          <div class="flex items-center gap-2">
-            <span
-              class="text-white/70 text-xs uppercase tracking-widest drop-shadow-[0_1px_6px_rgba(0,0,0,0.9)]"
-              >Quality</span
-            >
-            <button
-              v-for="level in ['low', 'medium', 'high'] as const"
-              :key="level"
-              @click="store.quality = level"
-              class="px-4 py-1.5 text-xs font-black uppercase tracking-widest border transition-all backdrop-blur-sm"
-              :class="
-                store.quality === level
-                  ? 'bg-cyan-500/30 border-cyan-400 text-cyan-200 shadow-[0_0_16px_rgba(0,255,255,0.35)]'
-                  : 'bg-black/40 border-white/25 text-white/80 hover:text-white hover:border-white/50'
-              "
-            >
-              {{ level }}
-            </button>
-          </div>
+        <div class="mb-8">
+          <QualityMenu />
+        </div>
 
+        <!-- Source tabs -->
+        <div class="mb-5 flex items-center justify-center gap-2">
           <button
-            @click="store.zenMode = !store.zenMode"
-            class="flex items-center gap-2 px-4 py-1.5 text-xs font-black uppercase tracking-widest border transition-all backdrop-blur-sm"
+            v-for="tab in (['browse', 'upload'] as const)"
+            :key="tab"
+            @click="songSource = tab"
+            class="px-5 py-1.5 text-xs font-black uppercase tracking-widest border transition-all backdrop-blur-sm"
             :class="
-              store.zenMode
-                ? 'bg-purple-500/30 border-purple-300 text-purple-200 shadow-[0_0_16px_rgba(168,85,247,0.35)]'
+              songSource === tab
+                ? 'bg-cyan-500/30 border-cyan-400 text-cyan-200 shadow-[0_0_16px_rgba(0,255,255,0.35)]'
                 : 'bg-black/40 border-white/25 text-white/80 hover:text-white hover:border-white/50'
             "
           >
-            <svg
-              class="w-3 h-3"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.5"
-            >
-              <circle cx="12" cy="12" r="4" />
-              <path
-                d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"
-              />
-            </svg>
-            Zen
+            {{ tab === 'browse' ? 'Browse Music' : 'Upload' }}
           </button>
         </div>
 
         <!-- Song selector -->
-        <SongSelector @select-file="handleFileSelect" />
+        <MusicBrowser v-if="songSource === 'browse'" @select-file="handleFileSelect" />
+        <SongSelector v-else @select-file="handleFileSelect" />
 
         <!-- Controls hint -->
         <p class="mt-8 text-center text-white/20 text-xs uppercase tracking-widest">
@@ -155,7 +135,7 @@ onUnmounted(() => {
         :audio-buffer="audioBuffer"
         :analysis="audioAnalysis"
         :track-name="songTitle"
-        :quality="quality"
+        :settings="sceneSettings"
         :zen-mode="store.zenMode"
         @close="handleGameClose"
       />

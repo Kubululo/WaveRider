@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import type { TrackData, GameScore } from '~/lib/bass-surfer/types'
-import { RetrowaveScene, LANE_WIDTH } from '~/lib/bass-surfer/sceneGenerator'
+import { RetrowaveScene, LANE_WIDTH, type SceneSettings } from '~/lib/bass-surfer/sceneGenerator'
 import { FrostedGlass } from '~/components/ui/frosted-glass'
 import type { AudioAnalysis } from '~/composables/useAudioAnalyzer'
 
@@ -10,7 +10,7 @@ const props = defineProps<{
   audioBuffer: AudioBuffer
   trackName?: string
   analysis?: AudioAnalysis
-  quality?: 'low' | 'medium' | 'high'
+  settings?: SceneSettings
   zenMode?: boolean
 }>()
 
@@ -116,11 +116,10 @@ onMounted(async () => {
   window.addEventListener('keydown', onKeyDown)
 
   if (canvasRef.value) {
-    const qualitySettings = props.quality ? RetrowaveScene.qualityPresets[props.quality] : undefined
     sceneManager = new RetrowaveScene(
       `${import.meta.env.BASE_URL}assets/retrowave/`,
       canvasRef.value,
-      qualitySettings
+      props.settings
     )
 
     if (props.trackData.segments) {
