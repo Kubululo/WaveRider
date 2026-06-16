@@ -158,7 +158,7 @@ onUnmounted(stopPreview)
 </script>
 
 <template>
-  <div class="flex flex-col gap-4">
+  <div class="flex h-full min-h-0 flex-col gap-4">
     <!-- Search -->
     <div class="relative">
       <svg
@@ -189,7 +189,7 @@ onUnmounted(stopPreview)
     </div>
 
     <!-- Results -->
-    <div class="track-scroll min-h-[18rem] max-h-[22rem] overflow-y-auto pr-1 -mr-1">
+    <div class="track-scroll min-h-0 flex-1 overflow-y-auto pr-1 -mr-1">
       <!-- Loading skeleton -->
       <div v-if="loading" class="flex flex-col items-center justify-center gap-3 py-16 text-white/40">
         <svg class="h-6 w-6 animate-spin" viewBox="0 0 24 24" fill="none">

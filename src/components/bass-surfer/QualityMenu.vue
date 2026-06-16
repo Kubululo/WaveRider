@@ -1,11 +1,19 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useBassSurferStore, type QualityLevel } from '~/stores/bassSurferStore'
 import type { SceneSettings } from '~/lib/bass-surfer/sceneGenerator'
 
 const store = useBassSurferStore()
 
 const levels: QualityLevel[] = ['low', 'medium', 'high', 'custom']
+
+// The Custom graphics editor opens as a modal overlay so it never grows the
+// page — picking "custom" opens it; other presets close it.
+const customOpen = ref(false)
+function pickQuality(level: QualityLevel) {
+  store.selectQuality(level)
+  customOpen.value = level === 'custom'
+}
 
 // Only the numeric SceneSettings fields are exposed as sliders.
 type NumericKey =
@@ -70,8 +78,8 @@ function sliderPct(s: SliderDef): number {
         <button
           v-for="level in levels"
           :key="level"
-          @click="store.selectQuality(level)"
-          class="px-4 py-1.5 text-xs font-black uppercase tracking-widest border transition-all backdrop-blur-sm"
+          @click="pickQuality(level)"
+          class="rounded-xl px-4 py-1.5 text-xs font-black uppercase tracking-widest border transition-all backdrop-blur-sm"
           :class="
             store.quality === level
               ? 'bg-cyan-500/30 border-cyan-400 text-cyan-200 shadow-[0_0_16px_rgba(0,255,255,0.35)]'
@@ -84,7 +92,7 @@ function sliderPct(s: SliderDef): number {
 
       <button
         @click="store.zenMode = !store.zenMode"
-        class="flex items-center gap-2 px-4 py-1.5 text-xs font-black uppercase tracking-widest border transition-all backdrop-blur-sm"
+        class="flex items-center gap-2 rounded-xl px-4 py-1.5 text-xs font-black uppercase tracking-widest border transition-all backdrop-blur-sm"
         :class="
           store.zenMode
             ? 'bg-purple-500/30 border-purple-300 text-purple-200 shadow-[0_0_16px_rgba(168,85,247,0.35)]'
@@ -101,20 +109,40 @@ function sliderPct(s: SliderDef): number {
       </button>
     </div>
 
-    <!-- Custom controls -->
-    <Transition name="custom-fade">
-      <div
-        v-if="store.quality === 'custom'"
-        class="w-full max-w-md rounded-xl border border-cyan-500/25 bg-black/50 backdrop-blur-md p-5 shadow-[0_0_24px_rgba(0,0,0,0.5)]"
-      >
-        <h3
-          class="mb-4 text-[11px] font-black uppercase tracking-[0.25em] text-cyan-300/90 border-b border-cyan-500/20 pb-2"
+    <!-- Custom controls — modal overlay (Teleported to body so it floats above
+         the single-screen layout instead of growing the page). -->
+    <Teleport to="body">
+      <Transition name="custom-fade">
+        <div
+          v-if="customOpen && store.quality === 'custom'"
+          class="fixed inset-0 z-50 flex items-center justify-center p-4"
         >
-          Custom Graphics
-        </h3>
+          <!-- Backdrop -->
+          <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" @click="customOpen = false" />
 
-        <!-- Sliders -->
-        <div class="flex flex-col gap-4">
+          <!-- Panel -->
+          <div
+            class="relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl border border-cyan-500/25 bg-black/80 p-5 shadow-[0_0_40px_rgba(0,0,0,0.6)] backdrop-blur-md"
+          >
+            <div
+              class="mb-4 flex items-center justify-between border-b border-cyan-500/20 pb-2"
+            >
+              <h3 class="text-[11px] font-black uppercase tracking-[0.25em] text-cyan-300/90">
+                Custom Graphics
+              </h3>
+              <button
+                @click="customOpen = false"
+                aria-label="Close custom graphics"
+                class="-mr-1 flex h-6 w-6 items-center justify-center rounded-lg text-white/50 transition-colors hover:bg-white/10 hover:text-white"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <path stroke-linecap="round" d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            </div>
+
+            <!-- Sliders -->
+            <div class="flex flex-col gap-4">
           <label v-for="s in sliders" :key="s.key" class="block">
             <div
               class="mb-1.5 flex items-center justify-between text-[11px] font-bold uppercase tracking-wider"
@@ -142,7 +170,7 @@ function sliderPct(s: SliderDef): number {
             v-for="t in toggles"
             :key="t.key"
             @click="settings[t.key] = !settings[t.key]"
-            class="px-3 py-1.5 text-[11px] font-black uppercase tracking-widest border transition-all"
+            class="rounded-xl px-3 py-1.5 text-[11px] font-black uppercase tracking-widest border transition-all"
             :class="
               settings[t.key]
                 ? 'bg-cyan-500/25 border-cyan-400 text-cyan-200'
@@ -169,8 +197,10 @@ function sliderPct(s: SliderDef): number {
             />
           </label>
         </div>
-      </div>
-    </Transition>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 

@@ -36,7 +36,7 @@ function select(value: string | null) {
     <div class="relative inline-flex">
       <button
         @click="open = !open"
-        class="flex min-w-[9rem] items-center justify-between gap-2 border px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider transition-all"
+        class="flex min-w-[9rem] items-center justify-between gap-2 rounded-xl border px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider transition-all"
         :class="
           open
             ? 'bg-cyan-500/25 border-cyan-400 text-cyan-200'
@@ -62,7 +62,7 @@ function select(value: string | null) {
       <!-- Panel -->
       <div
         v-if="open"
-        class="dropdown-scroll absolute left-0 top-full z-50 mt-1 max-h-64 w-full min-w-[9rem] overflow-y-auto border border-cyan-500/30 bg-black/95 py-1 shadow-[0_8px_28px_rgba(0,0,0,0.6)] backdrop-blur-md"
+        class="dropdown-scroll absolute left-0 top-full z-50 mt-1 max-h-64 w-full min-w-[9rem] overflow-y-auto rounded-xl border border-cyan-500/30 bg-black/95 py-1 shadow-[0_8px_28px_rgba(0,0,0,0.6)] backdrop-blur-md"
       >
         <button
           v-for="opt in options"

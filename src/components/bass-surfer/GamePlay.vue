@@ -4,6 +4,7 @@ import type { TrackData, GameScore } from '~/lib/bass-surfer/types'
 import { RetrowaveScene, LANE_WIDTH, type SceneSettings } from '~/lib/bass-surfer/sceneGenerator'
 import { FrostedGlass } from '~/components/ui/frosted-glass'
 import type { AudioAnalysis } from '~/composables/useAudioAnalyzer'
+import { useFullscreen } from '~/composables/useFullscreen'
 
 const props = defineProps<{
   trackData: TrackData
@@ -85,6 +86,39 @@ const isTouchDevice = ref(false)
 const touchFlash = ref<'left' | 'right' | null>(null)
 let touchFlashTimer: ReturnType<typeof setTimeout> | null = null
 
+// Fullscreen + immersive landscape handling (lives with the playable scene).
+const {
+  isFullscreen,
+  isSupported: fullscreenSupported,
+  enter: enterFullscreen,
+  toggle: toggleFullscreen,
+} = useFullscreen()
+const isPortrait = ref(false)
+
+function updateOrientation() {
+  isPortrait.value =
+    typeof window !== 'undefined' && window.matchMedia('(orientation: portrait)').matches
+}
+
+async function lockLandscape() {
+  // Android Chrome supports this (needs fullscreen + a gesture); on iOS it's a
+  // no-op and the rotate-device overlay is the fallback. `window.screen` —
+  // local refs would otherwise shadow nothing here, but be explicit.
+  const orientation = window.screen.orientation as ScreenOrientation & {
+    lock?: (o: 'landscape' | 'portrait' | 'natural' | 'any') => Promise<void>
+  }
+  try {
+    await orientation?.lock?.('landscape')
+  } catch {
+    /* unsupported / not allowed */
+  }
+}
+
+async function goImmersive() {
+  await enterFullscreen(document.documentElement)
+  await lockLandscape()
+}
+
 function moveLane(delta: -1 | 1) {
   if (isPaused.value || !isPlaying.value) return
   currentLane.value = Math.max(-1, Math.min(1, currentLane.value + delta))
@@ -98,9 +132,14 @@ function moveLane(delta: -1 | 1) {
 
 function onKeyDown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
-    if (isPlaying.value && !gameEnded.value) {
-      togglePause()
-    }
+    // The browser reserves Esc to leave fullscreen; we don't also pop the pause
+    // menu (that double action was disorienting). Pause is the HUD button or "P".
+    e.preventDefault()
+    return
+  }
+
+  if (e.key === 'p' || e.key === 'P') {
+    if (isPlaying.value && !gameEnded.value) togglePause()
     return
   }
 
@@ -116,6 +155,12 @@ function onKeyDown(e: KeyboardEvent) {
 onMounted(async () => {
   isTouchDevice.value = 'ontouchstart' in window || navigator.maxTouchPoints > 0
   window.addEventListener('keydown', onKeyDown)
+
+  updateOrientation()
+  window.addEventListener('resize', updateOrientation)
+  window.addEventListener('orientationchange', updateOrientation)
+  // Nudge mobile browsers to collapse the URL bar.
+  if (isTouchDevice.value) setTimeout(() => window.scrollTo(0, 1), 150)
 
   if (canvasRef.value) {
     sceneManager = new RetrowaveScene(
@@ -147,6 +192,13 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeyDown)
+  window.removeEventListener('resize', updateOrientation)
+  window.removeEventListener('orientationchange', updateOrientation)
+  try {
+    window.screen.orientation.unlock()
+  } catch {
+    /* unsupported */
+  }
   cleanup()
 })
 
@@ -306,6 +358,10 @@ function tick() {
 async function startGame() {
   if (isPlaying.value) return
 
+  // Tapping START is a user gesture — the moment we're allowed to go fullscreen
+  // and lock landscape on mobile.
+  if (isTouchDevice.value) void goImmersive()
+
   score.value = {
     score: 0,
     combo: 0,
@@ -419,6 +475,22 @@ function closeGame() {
 <template>
   <div class="relative w-full h-full font-mono select-none overflow-hidden bg-[#00020a]">
     <div ref="canvasRef" class="w-full h-full block outline-none" />
+
+    <!-- Fullscreen toggle (desktop) -->
+    <button
+      v-if="fullscreenSupported && !isTouchDevice"
+      @click="toggleFullscreen"
+      :aria-label="isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'"
+      :title="isFullscreen ? 'Exit fullscreen' : 'Fullscreen'"
+      class="absolute right-4 top-4 z-[9999998] flex h-9 w-9 items-center justify-center rounded-xl border border-white/20 bg-black/40 text-white/70 backdrop-blur-sm transition-all hover:border-cyan-400/60 hover:text-cyan-200"
+    >
+      <svg v-if="!isFullscreen" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4" />
+      </svg>
+      <svg v-else class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 4v4a1 1 0 0 1-1 1H4M20 9h-4a1 1 0 0 1-1-1V4M15 20v-4a1 1 0 0 1 1-1h4M4 15h4a1 1 0 0 1 1 1v4" />
+      </svg>
+    </button>
 
     <!-- Touch Zones (mobile only) -->
     <template v-if="isTouchDevice && isPlaying && !gameEnded && !isPaused">
@@ -642,6 +714,22 @@ function closeGame() {
         >
           {{ gameEnded ? 'BACK TO MENU' : 'BACK' }}
         </button>
+      </div>
+    </div>
+
+    <!-- Rotate-device prompt: forces a landscape experience on touch devices
+         even where orientation lock is unavailable (iOS). -->
+    <div
+      v-if="isTouchDevice && isPortrait"
+      class="absolute inset-0 z-[99999999] flex flex-col items-center justify-center gap-5 bg-[#06010c] px-8 text-center"
+    >
+      <svg class="h-16 w-16 animate-pulse text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+        <rect x="5" y="2" width="14" height="20" rx="2" />
+        <path stroke-linecap="round" d="M2 12a10 10 0 0 0 10 10M22 12A10 10 0 0 0 12 2" opacity="0.5" />
+      </svg>
+      <div>
+        <p class="text-lg font-black uppercase tracking-widest text-white">Rotate your device</p>
+        <p class="mt-2 text-sm text-white/50">WaveRider is best played in landscape.</p>
       </div>
     </div>
   </div>
