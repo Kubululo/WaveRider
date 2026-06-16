@@ -86,7 +86,8 @@ onUnmounted(() => {
       </div>
     </Transition>
 
-    <div v-if="screen === 'home'" class="relative h-screen overflow-hidden">
+    <Transition name="fade">
+      <div v-if="screen === 'home'" class="relative h-screen overflow-hidden">
         <!-- Fixed header: the wordmark, shrunken. -->
         <header
           class="fixed inset-x-0 top-0 z-30 flex flex-col items-center gap-0.5 border-b border-cyan-500/15 bg-gradient-to-b from-[#06010c]/85 to-transparent px-6 pb-3 pt-4 backdrop-blur-sm"
@@ -153,13 +154,16 @@ onUnmounted(() => {
           </p>
         </footer>
       </div>
+    </Transition>
 
     <!-- Analysis loader -->
-    <AnalysisLoader
-      v-if="screen === 'analyzing'"
-      :progress="analyzer.analysisProgress.value"
-      :song-title="songTitle"
-    />
+    <Transition name="fade">
+      <AnalysisLoader
+        v-if="screen === 'analyzing'"
+        :progress="analyzer.analysisProgress.value"
+        :song-title="songTitle"
+      />
+    </Transition>
 
     <!-- Game screen -->
     <Transition name="fade">
@@ -207,5 +211,17 @@ onUnmounted(() => {
   opacity: 0;
   transform: scale(1.08);
   filter: blur(10px);
+}
+
+/* Crossfade between screens (home → analyzing → game). The analyzing and game
+   screens are opaque full-screen overlays, so a simple opacity fade reads as a
+   smooth crossfade. */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.4s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

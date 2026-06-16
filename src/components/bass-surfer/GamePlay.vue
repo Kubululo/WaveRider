@@ -81,8 +81,13 @@ let rafId = 0
 
 const BASE_FOV = 95
 
-// Touch detection & flash state
+// Touch detection & flash state.
+// `isTouchDevice` is broad (any touch input) and only gates the optional touch
+// lane controls. `isMobile` is the stricter "phone/tablet" test — coarse pointer
+// with no hover — used to decide whether to force fullscreen + landscape. A
+// touchscreen laptop has a trackpad (hover + fine pointer) so it stays desktop.
 const isTouchDevice = ref(false)
+const isMobile = ref(false)
 const touchFlash = ref<'left' | 'right' | null>(null)
 let touchFlashTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -117,6 +122,13 @@ async function lockLandscape() {
 async function goImmersive() {
   await enterFullscreen(document.documentElement)
   await lockLandscape()
+}
+
+// Fallback: requesting fullscreen on mount can be blocked if the transient user
+// activation from track selection expired during loading. If so, the first tap
+// anywhere on the scene completes it.
+function onImmersiveGesture() {
+  if (isMobile.value && !isFullscreen.value) void goImmersive()
 }
 
 function moveLane(delta: -1 | 1) {
@@ -154,13 +166,20 @@ function onKeyDown(e: KeyboardEvent) {
 
 onMounted(async () => {
   isTouchDevice.value = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+  isMobile.value = window.matchMedia('(hover: none) and (pointer: coarse)').matches
   window.addEventListener('keydown', onKeyDown)
 
   updateOrientation()
   window.addEventListener('resize', updateOrientation)
   window.addEventListener('orientationchange', updateOrientation)
-  // Nudge mobile browsers to collapse the URL bar.
-  if (isTouchDevice.value) setTimeout(() => window.scrollTo(0, 1), 150)
+
+  // Phones go immersive as soon as the gameplay scene loads — fullscreen (hides
+  // the URL bar) + landscape lock — without waiting for START.
+  if (isMobile.value) {
+    setTimeout(() => window.scrollTo(0, 1), 150)
+    void goImmersive()
+    window.addEventListener('pointerdown', onImmersiveGesture, { once: true })
+  }
 
   if (canvasRef.value) {
     sceneManager = new RetrowaveScene(
@@ -194,6 +213,7 @@ onUnmounted(() => {
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('resize', updateOrientation)
   window.removeEventListener('orientationchange', updateOrientation)
+  window.removeEventListener('pointerdown', onImmersiveGesture)
   try {
     window.screen.orientation.unlock()
   } catch {
@@ -358,10 +378,6 @@ function tick() {
 async function startGame() {
   if (isPlaying.value) return
 
-  // Tapping START is a user gesture — the moment we're allowed to go fullscreen
-  // and lock landscape on mobile.
-  if (isTouchDevice.value) void goImmersive()
-
   score.value = {
     score: 0,
     combo: 0,
@@ -476,13 +492,14 @@ function closeGame() {
   <div class="relative w-full h-full font-mono select-none overflow-hidden bg-[#00020a]">
     <div ref="canvasRef" class="w-full h-full block outline-none" />
 
-    <!-- Fullscreen toggle (desktop) -->
+    <!-- Fullscreen toggle (desktop only): a faint corner ghost that brightens
+         on hover. Mobile force-enters fullscreen on START instead. -->
     <button
-      v-if="fullscreenSupported && !isTouchDevice"
+      v-if="fullscreenSupported && !isMobile"
       @click="toggleFullscreen"
       :aria-label="isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'"
       :title="isFullscreen ? 'Exit fullscreen' : 'Fullscreen'"
-      class="absolute right-4 top-4 z-[9999998] flex h-9 w-9 items-center justify-center rounded-xl border border-white/20 bg-black/40 text-white/70 backdrop-blur-sm transition-all hover:border-cyan-400/60 hover:text-cyan-200"
+      class="absolute right-3 top-3 z-[9999998] flex h-8 w-8 items-center justify-center rounded-lg text-white/80 opacity-25 transition-all duration-200 hover:bg-white/5 hover:text-cyan-200 hover:opacity-100"
     >
       <svg v-if="!isFullscreen" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4" />
@@ -720,7 +737,7 @@ function closeGame() {
     <!-- Rotate-device prompt: forces a landscape experience on touch devices
          even where orientation lock is unavailable (iOS). -->
     <div
-      v-if="isTouchDevice && isPortrait"
+      v-if="isMobile && isPortrait"
       class="absolute inset-0 z-[99999999] flex flex-col items-center justify-center gap-5 bg-[#06010c] px-8 text-center"
     >
       <svg class="h-16 w-16 animate-pulse text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
