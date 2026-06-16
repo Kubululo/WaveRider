@@ -1,9 +1,5 @@
 name: Release
 
-# Cut a release manually from the Actions tab. The workflow bumps the version
-# with `npm version` (which writes package.json + lockfile, commits, and creates
-# the vX.Y.Z tag), pushes the commit and tag back, then builds the game, bundles
-# it with a local launcher, and attaches the zip to a GitHub Release.
 on:
   workflow_dispatch:
     inputs:
@@ -18,6 +14,8 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 concurrency:
   group: release
@@ -31,12 +29,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # Persist an admin PAT so the version-bump commit + tag are pushed as a
-          # repository admin and bypass branch protection. The default
-          # GITHUB_TOKEN / github-actions[bot] cannot be a bypass actor.
-          # Requires repo secret RELEASE_TOKEN: a fine-grained PAT with
-          # Contents: write on this repo, owned by a user the ruleset's
-          # "Repository admin" bypass covers.
           token: ${{ secrets.RELEASE_TOKEN }}
 
       - name: Set up Node.js
@@ -66,8 +58,6 @@ jobs:
             patch|minor|major) ;;
             *) echo "::error::Invalid bump '$BUMP'"; exit 1 ;;
           esac
-          # npm version writes package.json + package-lock.json, commits, and
-          # tags vX.Y.Z; its stdout is the new tag (e.g. v1.1.0).
           NEW_TAG="$(npm version "$BUMP" -m "chore(release): %s")"
           echo "tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
 
@@ -106,3 +96,19 @@ jobs:
           name: WaveRider ${{ steps.bump.outputs.tag }}
           generate_release_notes: true
           files: ${{ steps.package.outputs.zip }}
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy-pages:
+    needs: release
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4
+        id: deployment
