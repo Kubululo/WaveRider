@@ -1,7 +1,7 @@
 {
   "name": "waverider",
   "private": true,
-  "version": "1.1.2",
+  "version": "1.2.0",
   "type": "module",
   "description": "A browser game that turns any song you drop in into a playable, beat-synced retrowave surf track.",
   "license": "MIT",
