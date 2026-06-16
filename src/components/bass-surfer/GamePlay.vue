@@ -117,7 +117,11 @@ onMounted(async () => {
 
   if (canvasRef.value) {
     const qualitySettings = props.quality ? RetrowaveScene.qualityPresets[props.quality] : undefined
-    sceneManager = new RetrowaveScene('/assets/retrowave/', canvasRef.value, qualitySettings)
+    sceneManager = new RetrowaveScene(
+      `${import.meta.env.BASE_URL}assets/retrowave/`,
+      canvasRef.value,
+      qualitySettings
+    )
 
     if (props.trackData.segments) {
       const heights = props.trackData.segments.map((s) => s.y)
