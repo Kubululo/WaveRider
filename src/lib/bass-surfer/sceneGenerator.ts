@@ -9,7 +9,6 @@ import {
   BufferAttribute,
   CircleGeometry,
   ClampToEdgeWrapping,
-  Clock,
   Color,
   ConeGeometry,
   CubeTextureLoader,
@@ -34,6 +33,7 @@ import {
   Shape,
   ShapeGeometry,
   SRGBColorSpace,
+  Timer,
   Vector2,
   Vector3,
   WebGLRenderer,
@@ -60,6 +60,17 @@ export const LANE_WIDTH = 3
 // runaway framebuffer (cost grows with the square of the scale).
 const MAX_RENDER_SCALE = 4
 
+// Sliding height-texture window. Rather than fit the whole track into one texture
+// (capped at the GPU's maxTextureSize, which forces lossy downsampling and makes
+// long tracks' road jitter), the height map is a fixed-size window that scrolls
+// with the player and is refilled at full resolution. The width must cover the
+// deepest thing that samples the height map — the farthest pyramids, ~950 world
+// units ahead — with margin. At ~0.5 world units/texel, 4096 texels ≈ 2000 units.
+const HEIGHT_WINDOW_TEXELS = 4096
+// Texels kept behind the player (the road extends only ~35 units back, so this is
+// generous); the rest of the window is the lookahead.
+const HEIGHT_WINDOW_BEHIND = 512
+
 // --- Types & Interfaces ---
 
 type SvgFileConfig = [string, number, number, number, number, string]
@@ -74,6 +85,12 @@ interface ThreeShader {
   uniforms: { [uniform: string]: { value: unknown } }
   vertexShader: string
   fragmentShader: string
+  // Repeat period (seconds) of this shader's scroll in the `time` uniform. The
+  // grid/instance scroll wraps with this period, so feeding `time % period`
+  // keeps the value tiny and precision-safe without any visible jump. Without
+  // it, `time * speed` grows with song length and overflows mediump fragment
+  // precision on long tracks → the grid visibly judders. See renderFrame().
+  scrollTimePeriod?: number
 }
 
 export interface SceneSettings {
@@ -98,7 +115,7 @@ export class RetrowaveScene {
     // only lever that smooths its interior (edge-based SMAA can't). Heaviest
     // preset; tuned for crisp visuals and video capture on a 1× display. Cost
     // scales with the square of this value and it's clamped to MAX_RENDER_SCALE.
-    pixelRatio: 2,
+    pixelRatio: 1,
     planeSize: 300,
     palmCount: 40,
     palmSpacing: 15,
@@ -157,10 +174,18 @@ export class RetrowaveScene {
   // Track displacement
   public playerGroup: Group | null = null
   private heightTexture: DataTexture | null = null
+  // Full-resolution track data (player physics + the height window read from these).
   private trackHeights: Float32Array = new Float32Array(1)
   private trackCenterX: Float32Array = new Float32Array(1)
   private trackRoll: Float32Array = new Float32Array(1)
   private trackDuration: number = 0
+
+  // Sliding height-texture window state (see setTrackData / updateHeightWindow).
+  private windowData: Float32Array | null = null
+  private windowTexels = 0
+  private windowStartSeg = -1
+  private windowProgress = 0
+  private windowWorldDist = 1
   private trackProgress: number = 0
   private readonly HEIGHT_SCALE: number = 0.35
 
@@ -168,7 +193,9 @@ export class RetrowaveScene {
   public renderer: WebGLRenderer
   public scene: Scene
   public camera: PerspectiveCamera
-  public clock: Clock = new Clock()
+  // Timer replaces the deprecated THREE.Clock. Call update() once per frame
+  // before reading getDelta() (see animate()).
+  public clock: Timer = new Timer()
   public mouse: Vector2 = new Vector2()
   public target: Vector2 = new Vector2()
   public composer!: EffectComposer
@@ -387,6 +414,8 @@ export class RetrowaveScene {
       const shader = s as ThreeShader
       shader.uniforms.speed = { value: this.animationSpeed }
       shader.uniforms.time = { value: 0 }
+      // Grid lines repeat every 1.0 in coord = every 2/speed in time.
+      shader.scrollTimePeriod = 2 / this.animationSpeed
       this.addTrackUniforms(shader)
       shader.vertexShader = `
         uniform float speed;
@@ -531,6 +560,8 @@ export class RetrowaveScene {
 
       shader.uniforms.speed = { value: this.animationSpeed }
       shader.uniforms.time = { value: 0 }
+      // Grid lines repeat every 1.0 in coord = every 2/speed in time.
+      shader.scrollTimePeriod = 2 / this.animationSpeed
       if (followTrack) this.addTrackUniforms(shader)
 
       shader.vertexShader = `
@@ -594,6 +625,8 @@ export class RetrowaveScene {
   ) {
     shader.uniforms.speed = { value: this.animationSpeed }
     shader.uniforms.time = { value: 0 }
+    // Instances wrap their z every v1 world units = every v1/speed in time.
+    shader.scrollTimePeriod = v1 / this.animationSpeed
     if (followTrack) this.addTrackUniforms(shader)
 
     const val1 = v1.toFixed(1)
@@ -642,34 +675,79 @@ export class RetrowaveScene {
   public setTrackData(heights: number[], centerXs: number[], rolls: number[], duration: number) {
     this.trackDuration = duration
 
+    const segCount = heights.length
+    // Keep the full-resolution track on the CPU. Player physics samples these
+    // directly, and the height-texture window is refilled from them — so nothing
+    // is ever downsampled regardless of song length.
+    this.trackHeights = Float32Array.from(heights)
+    this.trackCenterX = Float32Array.from(centerXs)
+    this.trackRoll = Float32Array.from(rolls)
+
+    // R = height, G = lateral road center offset, B = bank slope (tan), A unused.
+    // The texture is a sliding WINDOW over the track (HEIGHT_WINDOW_TEXELS wide),
+    // not the whole track — so it never hits maxTextureSize and never aliases.
     const maxSize = this.renderer.capabilities.maxTextureSize
-    const n = Math.min(heights.length, maxSize)
-    const ratio = heights.length / n
-
-    // R = height, G = lateral road center offset, B = bank slope (tan), A unused
-    const data = new Float32Array(n * 4)
-    const hArr = new Float32Array(n)
-    const xArr = new Float32Array(n)
-    const rArr = new Float32Array(n)
-    for (let i = 0; i < n; i++) {
-      const src = Math.floor(i * ratio)
-      hArr[i] = heights[src]
-      xArr[i] = centerXs[src] ?? 0
-      rArr[i] = rolls[src] ?? 0
-      data[i * 4] = hArr[i]
-      data[i * 4 + 1] = xArr[i]
-      data[i * 4 + 2] = rArr[i]
-    }
-
-    this.trackHeights = hArr
-    this.trackCenterX = xArr
-    this.trackRoll = rArr
-    this.heightTexture = new DataTexture(data, n, 1, RGBAFormat, FloatType)
+    const w = Math.max(1, Math.min(HEIGHT_WINDOW_TEXELS, segCount, maxSize))
+    this.windowTexels = w
+    this.windowStartSeg = -1 // force the first refill
+    this.windowData = new Float32Array(w * 4)
+    this.heightTexture = new DataTexture(this.windowData, w, 1, RGBAFormat, FloatType)
     this.heightTexture.minFilter = LinearFilter
     this.heightTexture.magFilter = LinearFilter
     this.heightTexture.wrapS = ClampToEdgeWrapping
     this.heightTexture.wrapT = ClampToEdgeWrapping
     this.heightTexture.needsUpdate = true
+
+    this.trackProgress = 0
+    this.updateHeightWindow() // fill the initial window at the track start
+  }
+
+  /**
+   * Refills the sliding height-texture window around the current trackProgress and
+   * recomputes the window-relative progress / world-distance the displacement
+   * shader consumes. Because the texture only spans the window, the existing
+   * shader formula `sampleU = trackProgress + (5 - z) / totalWorldDist` produces
+   * window-local UVs verbatim once it's fed `windowProgress` and `windowWorldDist`
+   * — no GLSL change. The window holds full-resolution data, so the road no longer
+   * aliases on long tracks. Called once per frame from updateTime().
+   */
+  private updateHeightWindow() {
+    const data = this.windowData
+    const w = this.windowTexels
+    const segCount = this.trackHeights.length
+    if (!data || w <= 1 || segCount <= 1) {
+      this.windowProgress = 0
+      this.windowWorldDist = 1
+      return
+    }
+
+    const totalWorldDist = this.trackDuration * this.animationSpeed
+    const worldPerSeg = totalWorldDist / (segCount - 1)
+
+    const playerSegF = this.trackProgress * (segCount - 1)
+    const maxStart = Math.max(0, segCount - w)
+    const start = Math.min(maxStart, Math.max(0, Math.round(playerSegF) - HEIGHT_WINDOW_BEHIND))
+
+    // Only re-upload when the window actually slides (integer texel). Refill 1:1
+    // from the full-res arrays — no decimation, no aliasing.
+    if (start !== this.windowStartSeg) {
+      this.windowStartSeg = start
+      for (let j = 0; j < w; j++) {
+        const src = start + j
+        const o = j * 4
+        data[o] = this.trackHeights[src]
+        data[o + 1] = this.trackCenterX[src]
+        data[o + 2] = this.trackRoll[src]
+      }
+      if (this.heightTexture) this.heightTexture.needsUpdate = true
+    }
+
+    // localProgress: where the player sits inside the window, in [0,1] texel space.
+    // Derivation: global seg of a vertex = start + localU·(w-1), and we need that
+    // to equal playerSegF + (5-z)/worldPerSeg, which holds when
+    // windowProgress = (playerSegF - start)/(w-1) and windowWorldDist = (w-1)·worldPerSeg.
+    this.windowProgress = (playerSegF - start) / (w - 1)
+    this.windowWorldDist = (w - 1) * worldPerSeg
   }
 
   public updateTime(progress: number) {
@@ -678,6 +756,7 @@ export class RetrowaveScene {
     if (this.trackDuration > 0) {
       this.time = progress * this.trackDuration
     }
+    this.updateHeightWindow()
   }
 
   /** Latency-corrected, linearly interpolated lookup into a per-segment track array */
@@ -829,6 +908,8 @@ export class RetrowaveScene {
       const shader = s as ThreeShader
       shader.uniforms.speed = { value: this.animationSpeed }
       shader.uniforms.time = { value: 0 }
+      // Grid scroll (when grid) repeats every 1.0 in coord = every 2/speed in time.
+      shader.scrollTimePeriod = 2 / this.animationSpeed
       this.addTrackUniforms(shader)
 
       shader.vertexShader = `
@@ -988,12 +1069,18 @@ export class RetrowaveScene {
 
     if (this.fpsCounterIsActive && this.stats) this.stats.update()
 
-    const currentTotalDist = this.trackDuration > 0 ? this.trackDuration * this.animationSpeed : 1.0
-
     this.materialShaders.forEach((s) => {
-      if (s.uniforms.time) s.uniforms.time.value = this.time
-      if (s.uniforms.trackProgress) s.uniforms.trackProgress.value = this.trackProgress
-      if (s.uniforms.totalWorldDist) s.uniforms.totalWorldDist.value = currentTotalDist
+      // Feed the scroll a time wrapped to the shader's repeat period. `this.time`
+      // grows to the song's full duration; left unwrapped, `time * speed` blows
+      // past mediump fragment precision on long tracks and the grid judders.
+      // Wrapping by an exact multiple of the scroll period is visually seamless.
+      if (s.uniforms.time) {
+        s.uniforms.time.value = s.scrollTimePeriod ? this.time % s.scrollTimePeriod : this.time
+      }
+      // Displacement reads the sliding height window: window-relative progress and
+      // world-distance make the unchanged shader formula sample window-local UVs.
+      if (s.uniforms.trackProgress) s.uniforms.trackProgress.value = this.windowProgress
+      if (s.uniforms.totalWorldDist) s.uniforms.totalWorldDist.value = this.windowWorldDist
       if (s.uniforms.latency) s.uniforms.latency.value = this.latency
       if (s.uniforms.heightMap) s.uniforms.heightMap.value = this.heightTexture
     })
@@ -1015,6 +1102,7 @@ export class RetrowaveScene {
   public animate = () => {
     if (!this.renderer) return
     requestAnimationFrame(this.animate)
+    this.clock.update()
     this.time += this.clock.getDelta()
     this.renderFrame()
   }

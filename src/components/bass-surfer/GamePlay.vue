@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue'
 import type { TrackData, GameScore } from '~/lib/bass-surfer/types'
-import { RetrowaveScene, LANE_WIDTH } from '~/lib/bass-surfer/sceneGenerator'
+import { RetrowaveScene, LANE_WIDTH, type SceneSettings } from '~/lib/bass-surfer/sceneGenerator'
 import { FrostedGlass } from '~/components/ui/frosted-glass'
 import type { AudioAnalysis } from '~/composables/useAudioAnalyzer'
+import { useFullscreen } from '~/composables/useFullscreen'
 
 const props = defineProps<{
   trackData: TrackData
   audioBuffer: AudioBuffer
   trackName?: string
   analysis?: AudioAnalysis
-  quality?: 'low' | 'medium' | 'high'
+  settings?: SceneSettings
   zenMode?: boolean
 }>()
 
@@ -72,16 +73,63 @@ let audioCtx: AudioContext | null = null
 let sourceNode: AudioBufferSourceNode | null = null
 let startTime = 0
 let lastProgress = 0
+// Scroll distance (world units) resolved last frame, for swept orb collision.
+let lastScrollOffset = 0
 let playerPitch = 0
 let playerYaw = 0
 let rafId = 0
 
 const BASE_FOV = 95
 
-// Touch detection & flash state
+// Touch detection & flash state.
+// `isTouchDevice` is broad (any touch input) and only gates the optional touch
+// lane controls. `isMobile` is the stricter "phone/tablet" test — coarse pointer
+// with no hover — used to decide whether to force fullscreen + landscape. A
+// touchscreen laptop has a trackpad (hover + fine pointer) so it stays desktop.
 const isTouchDevice = ref(false)
+const isMobile = ref(false)
 const touchFlash = ref<'left' | 'right' | null>(null)
 let touchFlashTimer: ReturnType<typeof setTimeout> | null = null
+
+// Fullscreen + immersive landscape handling (lives with the playable scene).
+const {
+  isFullscreen,
+  isSupported: fullscreenSupported,
+  enter: enterFullscreen,
+  toggle: toggleFullscreen,
+} = useFullscreen()
+const isPortrait = ref(false)
+
+function updateOrientation() {
+  isPortrait.value =
+    typeof window !== 'undefined' && window.matchMedia('(orientation: portrait)').matches
+}
+
+async function lockLandscape() {
+  // Android Chrome supports this (needs fullscreen + a gesture); on iOS it's a
+  // no-op and the rotate-device overlay is the fallback. `window.screen` —
+  // local refs would otherwise shadow nothing here, but be explicit.
+  const orientation = window.screen.orientation as ScreenOrientation & {
+    lock?: (o: 'landscape' | 'portrait' | 'natural' | 'any') => Promise<void>
+  }
+  try {
+    await orientation?.lock?.('landscape')
+  } catch {
+    /* unsupported / not allowed */
+  }
+}
+
+async function goImmersive() {
+  await enterFullscreen(document.documentElement)
+  await lockLandscape()
+}
+
+// Fallback: requesting fullscreen on mount can be blocked if the transient user
+// activation from track selection expired during loading. If so, the first tap
+// anywhere on the scene completes it.
+function onImmersiveGesture() {
+  if (isMobile.value && !isFullscreen.value) void goImmersive()
+}
 
 function moveLane(delta: -1 | 1) {
   if (isPaused.value || !isPlaying.value) return
@@ -96,9 +144,14 @@ function moveLane(delta: -1 | 1) {
 
 function onKeyDown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
-    if (isPlaying.value && !gameEnded.value) {
-      togglePause()
-    }
+    // The browser reserves Esc to leave fullscreen; we don't also pop the pause
+    // menu (that double action was disorienting). Pause is the HUD button or "P".
+    e.preventDefault()
+    return
+  }
+
+  if (e.key === 'p' || e.key === 'P') {
+    if (isPlaying.value && !gameEnded.value) togglePause()
     return
   }
 
@@ -113,14 +166,26 @@ function onKeyDown(e: KeyboardEvent) {
 
 onMounted(async () => {
   isTouchDevice.value = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+  isMobile.value = window.matchMedia('(hover: none) and (pointer: coarse)').matches
   window.addEventListener('keydown', onKeyDown)
 
+  updateOrientation()
+  window.addEventListener('resize', updateOrientation)
+  window.addEventListener('orientationchange', updateOrientation)
+
+  // Phones go immersive as soon as the gameplay scene loads — fullscreen (hides
+  // the URL bar) + landscape lock — without waiting for START.
+  if (isMobile.value) {
+    setTimeout(() => window.scrollTo(0, 1), 150)
+    void goImmersive()
+    window.addEventListener('pointerdown', onImmersiveGesture, { once: true })
+  }
+
   if (canvasRef.value) {
-    const qualitySettings = props.quality ? RetrowaveScene.qualityPresets[props.quality] : undefined
     sceneManager = new RetrowaveScene(
       `${import.meta.env.BASE_URL}assets/retrowave/`,
       canvasRef.value,
-      qualitySettings
+      props.settings
     )
 
     if (props.trackData.segments) {
@@ -146,6 +211,14 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeyDown)
+  window.removeEventListener('resize', updateOrientation)
+  window.removeEventListener('orientationchange', updateOrientation)
+  window.removeEventListener('pointerdown', onImmersiveGesture)
+  try {
+    window.screen.orientation.unlock()
+  } catch {
+    /* unsupported */
+  }
   cleanup()
 })
 
@@ -264,28 +337,39 @@ function tick() {
     const collectibles = sceneManager.getCollectibles()
     const playerZ = sceneManager.playerGroup!.position.z
 
+    // Swept collision: an orb sits at z = baseZ + scrollOffset, and scrollOffset
+    // grows monotonically with the audio clock (= elapsed × animationSpeed). Each
+    // orb crosses the player plane (dz = 0) at exactly scrollOffset = playerZ -
+    // baseZ. Resolving on that crossing — instead of testing presence in a fixed
+    // ±2 window each frame — means a dropped/long frame that jumps the orb clean
+    // past the window can't cause a phantom miss. Frame-rate independent.
+    const scrollOffset = elapsed * sceneManager.animationSpeed
+
     for (let i = 0; i < collectibles.length; i++) {
       const c = collectibles[i]
       if (!c.alive) continue
 
-      const dz = c.mesh.position.z - playerZ
-
-      if (Math.abs(dz) < 2.0 && c.lane === currentLane.value) {
+      const crossOffset = playerZ - c.baseZ
+      // Did the orb pass the player plane somewhere between last frame and now?
+      if (crossOffset > lastScrollOffset && crossOffset <= scrollOffset) {
         sceneManager.removeCollectible(i)
-        score.value.collectiblesHit++
-        score.value.combo++
-        if (score.value.combo > score.value.maxCombo) {
-          score.value.maxCombo = score.value.combo
+        if (c.lane === currentLane.value) {
+          score.value.collectiblesHit++
+          score.value.combo++
+          if (score.value.combo > score.value.maxCombo) {
+            score.value.maxCombo = score.value.combo
+          }
+          score.value.multiplier = 1 + Math.floor(score.value.combo / 10)
+          score.value.score += 100 * score.value.multiplier
+          displayScore.value = score.value.score
+        } else {
+          score.value.combo = 0
+          score.value.multiplier = 1
         }
-        score.value.multiplier = 1 + Math.floor(score.value.combo / 10)
-        score.value.score += 100 * score.value.multiplier
-        displayScore.value = score.value.score
-      } else if (dz > 2.0) {
-        sceneManager.removeCollectible(i)
-        score.value.combo = 0
-        score.value.multiplier = 1
       }
     }
+
+    lastScrollOffset = scrollOffset
   }
 
   sceneManager.renderFrame()
@@ -323,6 +407,7 @@ async function startGame() {
 
   startTime = audioCtx.currentTime + 0.1
   lastProgress = 0
+  lastScrollOffset = 0
   sourceNode.start(startTime)
 
   sourceNode.onended = () => {
@@ -406,6 +491,23 @@ function closeGame() {
 <template>
   <div class="relative w-full h-full font-mono select-none overflow-hidden bg-[#00020a]">
     <div ref="canvasRef" class="w-full h-full block outline-none" />
+
+    <!-- Fullscreen toggle (desktop only): a faint corner ghost that brightens
+         on hover. Mobile force-enters fullscreen on START instead. -->
+    <button
+      v-if="fullscreenSupported && !isMobile"
+      @click="toggleFullscreen"
+      :aria-label="isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'"
+      :title="isFullscreen ? 'Exit fullscreen' : 'Fullscreen'"
+      class="absolute right-3 top-3 z-[9999998] flex h-8 w-8 items-center justify-center rounded-lg text-white/80 opacity-25 transition-all duration-200 hover:bg-white/5 hover:text-cyan-200 hover:opacity-100"
+    >
+      <svg v-if="!isFullscreen" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4" />
+      </svg>
+      <svg v-else class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 4v4a1 1 0 0 1-1 1H4M20 9h-4a1 1 0 0 1-1-1V4M15 20v-4a1 1 0 0 1 1-1h4M4 15h4a1 1 0 0 1 1 1v4" />
+      </svg>
+    </button>
 
     <!-- Touch Zones (mobile only) -->
     <template v-if="isTouchDevice && isPlaying && !gameEnded && !isPaused">
@@ -629,6 +731,22 @@ function closeGame() {
         >
           {{ gameEnded ? 'BACK TO MENU' : 'BACK' }}
         </button>
+      </div>
+    </div>
+
+    <!-- Rotate-device prompt: forces a landscape experience on touch devices
+         even where orientation lock is unavailable (iOS). -->
+    <div
+      v-if="isMobile && isPortrait"
+      class="absolute inset-0 z-[99999999] flex flex-col items-center justify-center gap-5 bg-[#06010c] px-8 text-center"
+    >
+      <svg class="h-16 w-16 animate-pulse text-cyan-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+        <rect x="5" y="2" width="14" height="20" rx="2" />
+        <path stroke-linecap="round" d="M2 12a10 10 0 0 0 10 10M22 12A10 10 0 0 0 12 2" opacity="0.5" />
+      </svg>
+      <div>
+        <p class="text-lg font-black uppercase tracking-widest text-white">Rotate your device</p>
+        <p class="mt-2 text-sm text-white/50">WaveRider is best played in landscape.</p>
       </div>
     </div>
   </div>

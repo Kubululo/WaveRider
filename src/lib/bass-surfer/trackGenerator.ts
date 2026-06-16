@@ -21,8 +21,8 @@ const GENERATOR_CONFIG = {
   // 2. Bump Height (World Units)
   // These are the "jumps" added ON TOP of the terrain when a beat hits
   INTENSITY: {
-    BASS: 4,
-    MID: 3,
+    BASS: 5,
+    MID: 4,
     HIGH: 2,
   },
 
@@ -99,6 +99,17 @@ const GENERATOR_CONFIG = {
     // Slow enough that the lean crosses zero over a wide neutral stretch at
     // curve direction changes — bumps landing there shouldn't tilt opposite ways
     BANK_SMOOTHING: 0.02, // EMA factor per segment (~800ms at 60fps)
+  },
+
+  // 7b. Collectible spacing — orbs are gated by their OWN minimum interval,
+  // decoupled from the beat-jump cooldowns above. The terrain bumps still land
+  // on every qualifying beat (so the track keeps tracking the music), but an orb
+  // only spawns if at least this long has passed since the previous orb. Without
+  // this, lowering BLOCK_MID/BLOCK_HIGH (or a busy highs-driven section, where
+  // BLOCK_HIGH is already only 100ms) could stack orbs a few frames apart and
+  // make them impossible to collect.
+  COLLECTIBLE: {
+    MIN_INTERVAL_MS: 500, // ≈ at most 2 orbs/sec, comfortably catchable
   },
 
   // 7. Melodic driver detection (mids vs highs)
@@ -267,6 +278,9 @@ export function generateTrack(analysis: AudioAnalysis, variationSeed?: string): 
   let nextAllowedMid = 0
   let nextAllowedHigh = 0
 
+  // -- COLLECTIBLE SPACING STATE (independent of the beat cooldowns) --
+  let nextAllowedCollectible = 0
+
   // -- BANKING STATE --
   let currentBanking = 0
 
@@ -360,6 +374,18 @@ export function generateTrack(analysis: AudioAnalysis, variationSeed?: string): 
       nextAllowedBass = currentTimeMs + GENERATOR_CONFIG.COOLDOWNS.HIGH_TRIGGER.BLOCK_BASS
       nextAllowedMid = currentTimeMs + GENERATOR_CONFIG.COOLDOWNS.HIGH_TRIGGER.BLOCK_MID
       nextAllowedHigh = currentTimeMs + GENERATOR_CONFIG.COOLDOWNS.HIGH_TRIGGER.BLOCK_HIGH
+    }
+
+    // Gate collectibles by their own minimum interval, separate from the beat
+    // cooldowns: the bump above still happens on the beat, but the orb is only
+    // kept if enough time has passed since the last one — otherwise orbs could
+    // stack a few frames apart when the mid/high block times are tuned low.
+    if (spawnCollectible) {
+      if (currentTimeMs < nextAllowedCollectible) {
+        spawnCollectible = false
+      } else {
+        nextAllowedCollectible = currentTimeMs + GENERATOR_CONFIG.COLLECTIBLE.MIN_INTERVAL_MS
+      }
     }
 
     // Apply Gravity to the "Jump" value

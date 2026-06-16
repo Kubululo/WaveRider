@@ -45,6 +45,28 @@ describe('generateTrack', () => {
     }
   })
 
+  it('spaces collectibles ≥ MIN_INTERVAL_MS apart even with dense high onsets', () => {
+    // Constant strong high-band onsets would otherwise spawn an orb roughly
+    // every BLOCK_HIGH (100ms). The dedicated collectible interval must thin them.
+    const duration = 10
+    const frameCount = duration * 60
+    const frames = Array.from({ length: frameCount }, (_, i) =>
+      makeFrame(i, { spectralFluxHighs: 0.9, highs: 0.6, spectralFluxMids: 0, spectralFluxBass: 0 })
+    )
+    const result = generateTrack({ buffer: {} as AudioBuffer, duration, frames })
+
+    const orbIdx = result.segments
+      .map((s, i) => (s.collectible === 'orb' ? i : -1))
+      .filter((i) => i >= 0)
+
+    expect(orbIdx.length).toBeGreaterThan(1)
+    const msPerSeg = 1000 / 60
+    for (let k = 1; k < orbIdx.length; k++) {
+      const gapMs = (orbIdx[k] - orbIdx[k - 1]) * msPerSeg
+      expect(gapMs).toBeGreaterThanOrEqual(499) // 500ms minus float/rounding slack
+    }
+  })
+
   it('segment count equals floor(duration × 60)', () => {
     // MESH_FPS is 60 in GENERATOR_CONFIG
     const result = generateTrack(makeAnalysis(300, 5))

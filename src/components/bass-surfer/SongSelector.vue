@@ -48,46 +48,43 @@ function processFile(file: File) {
 </script>
 
 <template>
-  <div class="flex flex-col gap-8">
-    <div>
-      <h2 class="mb-4 text-lg font-semibold text-white/80">Upload a Song</h2>
-      <div
-        class="flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-10 transition-colors cursor-pointer"
-        :class="
-          isDragging
-            ? 'border-cyan-400 bg-cyan-400/5'
-            : 'border-white/15 hover:border-white/30 bg-white/5'
-        "
-        @dragover="handleDragOver"
-        @dragleave="handleDragLeave"
-        @drop="handleDrop"
-        @click="fileInput?.click()"
+  <div class="flex h-full flex-col">
+    <div
+      class="flex flex-1 flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed p-10 transition-colors cursor-pointer"
+      :class="
+        isDragging
+          ? 'border-cyan-400 bg-cyan-400/5'
+          : 'border-white/15 hover:border-white/30 bg-white/5'
+      "
+      @dragover="handleDragOver"
+      @dragleave="handleDragLeave"
+      @drop="handleDrop"
+      @click="fileInput?.click()"
+    >
+      <svg
+        class="h-10 w-10 text-white/30"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        stroke-width="1.5"
       >
-        <svg
-          class="h-10 w-10 text-white/30"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          stroke-width="1.5"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            d="M9 8.25H7.5a2.25 2.25 0 0 0-2.25 2.25v9a2.25 2.25 0 0 0 2.25 2.25h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25H15m0-3-3-3m0 0-3 3m3-3V15"
-          />
-        </svg>
-        <p class="text-sm text-white/50">
-          Drag & drop an audio file or <span class="text-cyan-400 underline">browse</span>
-        </p>
-        <p class="text-xs text-white/30">MP3, WAV, OGG, FLAC, M4A — max 20 MB</p>
-        <input
-          ref="fileInput"
-          type="file"
-          :accept="ACCEPTED"
-          class="hidden"
-          @change="handleFileSelect"
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          d="M9 8.25H7.5a2.25 2.25 0 0 0-2.25 2.25v9a2.25 2.25 0 0 0 2.25 2.25h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25H15m0-3-3-3m0 0-3 3m3-3V15"
         />
-      </div>
+      </svg>
+      <p class="text-sm text-white/50">
+        Drag & drop an audio file or <span class="text-cyan-400 underline">browse</span>
+      </p>
+      <p class="text-xs text-white/30">MP3, WAV, OGG, FLAC, M4A — max 20 MB</p>
+      <input
+        ref="fileInput"
+        type="file"
+        :accept="ACCEPTED"
+        class="hidden"
+        @change="handleFileSelect"
+      />
     </div>
   </div>
 </template>

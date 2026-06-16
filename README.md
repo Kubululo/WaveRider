@@ -12,8 +12,20 @@
 
 **Drop any song. Ride the wave.**
 
-WaveRider is a browser game that turns any audio file you drop in into a playable, beat-synced retrowave surf track.
+WaveRider is a browser game that turns any song into a playable, beat-synced retrowave surf track — either
+drop in your own audio file or browse free music straight from [Audius](https://audius.org/).
 Built with Vue 3, Web Audio API, and three.js.
+
+## Features
+
+- 🎵 **Bring your own track or browse Audius** — drag & drop a local file, or search and stream from the built-in
+  Audius music browser (trending by genre, with inline previews).
+- 🌊 **Beat-synced generation** — per-band spectral-flux analysis turns the audio into a bumpy, curving retrowave road.
+- 🎚️ **Quality presets + custom graphics** — Low / Medium / High, plus a Custom panel to dial in render scale, draw
+  distance, scene density, bloom, and scanlines.
+- 🧘 **Zen mode** — drop the collectibles and just ride.
+- 🖥️ **Immersive mode** — a fullscreen toggle on desktop; phones auto-enter fullscreen and lock to landscape on start,
+  with a "rotate your device" prompt in portrait.
 
 ## Quick Start
 
@@ -27,7 +39,8 @@ npm run preview # preview the production build
 ## How to Play
 
 1. Open the game in your browser.
-2. Drag & drop (or click to browse) any MP3, WAV, OGG, FLAC, or M4A file (max 20 MB).
+2. Pick a track — **Browse Music** to search/stream free songs from Audius, or **Upload** to drag & drop (or click to
+   browse) your own MP3, WAV, OGG, FLAC, or M4A file (max 20 MB).
 3. WaveRider analyses the audio and generates a track from it.
 4. Press **START** and surf!
 
@@ -37,16 +50,22 @@ npm run preview # preview the production build
 |------------------|---------------------|
 | `←` / `A`        | Move left lane      |
 | `→` / `D`        | Move right lane     |
-| `Esc`            | Pause / Resume      |
+| `P`              | Pause / Resume      |
 | Touch left half  | Move left (mobile)  |
 | Touch right half | Move right (mobile) |
+
+> **Pausing:** use the `P` key or the on-screen pause button. `Esc` is intentionally left to the browser's
+> exit-fullscreen behaviour and no longer opens the menu.
+>
+> **Fullscreen:** desktop has a fullscreen toggle in the top-right corner of the game; phones go fullscreen and lock to
+> landscape automatically when you press **START**.
 
 ### Quality Settings
 
 - **Low** — no bloom or scanlines, 0.65× render scale and reduced draw distance; best for weak devices.
 - **Medium** — bloom + scanlines, 1× render scale.
-- **High** — full post-processing, maximum scene density and draw distance, and supersampling (renders above native resolution and downscales) to eliminate the neon grid's moiré shimmer. Scanlines are off here so they don't beat against a recorder's pixel grid. Best for crisp visuals and video capture; heaviest on the GPU.
-
+- **High** — full post-processing, maximum scene density and draw distance.
+- **Custom** — set your own based on your taste and device capability
 ## Project Structure
 
 ```
@@ -61,27 +80,32 @@ waverider/
 │   ├── components/
 │   │   ├── bass-surfer/
 │   │   │   ├── AnalysisLoader.vue  # Loading screen shown during audio analysis
-│   │   │   ├── GamePlay.vue        # Full game view (3D scene + HUD + menus)
+│   │   │   ├── GamePlay.vue        # Full game view (3D scene + HUD + menus + immersive mode)
+│   │   │   ├── MusicBrowser.vue    # Audius search / trending browser with previews
+│   │   │   ├── QualityMenu.vue     # Quality presets, Zen toggle, custom graphics modal
 │   │   │   └── SongSelector.vue    # Drag-and-drop file picker
 │   │   └── ui/
+│   │       ├── DropdownSelect.vue  # Styled dropdown (genre / sort filters)
 │   │       └── frosted-glass/      # Frosted glass panel component
 │   │
 │   ├── composables/
-│   │   └── useAudioAnalyzer.ts     # Web Audio spectral-flux analysis (per-band onsets)
+│   │   ├── useAudioAnalyzer.ts     # Web Audio spectral-flux analysis (per-band onsets)
+│   │   └── useFullscreen.ts        # Fullscreen API wrapper (with WebKit fallback)
 │   │
 │   ├── lib/
 │   │   └── bass-surfer/
+│   │       ├── audius.ts           # Audius API client (trending, search, stream, download)
 │   │       ├── sceneGenerator.ts   # three.js retrowave scene builder and renderer
 │   │       ├── trackGenerator.ts   # Converts audio analysis → track segments
 │   │       └── types.ts            # Shared TypeScript interfaces
 │   │
 │   ├── stores/
-│   │   └── bassSurferStore.ts      # Pinia store (quality, zen mode, selected file)
+│   │   └── bassSurferStore.ts      # Pinia store (quality, custom settings, zen mode)
 │   │
 │   ├── css/
 │   │   └── main.css                # Tailwind CSS entry
 │   │
-│   ├── App.vue                     # Root component — screen routing (home → analyzing → game)
+│   ├── App.vue                     # Root component — intro splash + screen routing (home → analyzing → game)
 │   └── main.ts                     # App entry point
 │
 ├── index.html
@@ -95,11 +119,12 @@ waverider/
 
 ### Changing the scene path
 
-Assets are served from `/assets/retrowave/`. If you host under a sub-path, update the first argument to
-`new RetrowaveScene(...)` in `src/components/bass-surfer/GamePlay.vue`:
+Assets are served from `<base>/assets/retrowave/`, where `<base>` comes from Vite's `import.meta.env.BASE_URL`
+(set the `base` option in `vite.config.ts` when hosting under a sub-path, e.g. GitHub Pages). The path is assembled in
+`src/components/bass-surfer/GamePlay.vue`:
 
 ```ts
-sceneManager = new RetrowaveScene('/your-base/assets/retrowave/', canvasRef.value, qualitySettings)
+sceneManager = new RetrowaveScene(`${import.meta.env.BASE_URL}assets/retrowave/`, canvasRef.value, props.settings)
 ```
 
 ### Adjusting quality presets
