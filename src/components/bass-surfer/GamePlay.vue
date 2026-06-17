@@ -13,6 +13,7 @@ import PauseMenu from '~/components/bass-surfer/game/PauseMenu.vue'
 import ResultsScreen from '~/components/bass-surfer/game/ResultsScreen.vue'
 import ShareScoreModal from '~/components/bass-surfer/game/ShareScoreModal.vue'
 import RotateDevicePrompt from '~/components/bass-surfer/game/RotateDevicePrompt.vue'
+import CountdownOverlay from '~/components/bass-surfer/game/CountdownOverlay.vue'
 
 const props = defineProps<{
   trackData: TrackData
@@ -23,7 +24,7 @@ const props = defineProps<{
   zenMode?: boolean
 }>()
 
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'ready', 'prepareProgress'])
 
 const canvasRef = ref<HTMLDivElement | null>(null)
 const shareModal = ref<InstanceType<typeof ShareScoreModal> | null>(null)
@@ -39,6 +40,7 @@ const {
   isPaused,
   currentTimeDisplay,
   touchFlash,
+  countdown,
   score,
   displayScore,
   showDebug,
@@ -51,7 +53,10 @@ const {
   resumeGame,
   restartGame,
   cleanup,
-} = useGameEngine(props, canvasRef)
+} = useGameEngine(props, canvasRef, {
+  onProgress: (p) => emit('prepareProgress', p),
+  onReady: () => emit('ready'),
+})
 
 function closeGame() {
   cleanup()
@@ -92,7 +97,7 @@ function closeGame() {
     />
 
     <PauseMenu
-      v-if="isPaused"
+      v-if="isPaused && countdown === null"
       :show-debug="showDebug"
       :has-analysis="!!analysis"
       @resume="resumeGame"
@@ -118,6 +123,8 @@ function closeGame() {
       :track-name="trackName"
       :zen-mode="zenMode"
     />
+
+    <CountdownOverlay v-if="countdown !== null" :count="countdown" />
 
     <RotateDevicePrompt v-if="isMobile && isPortrait" />
   </div>

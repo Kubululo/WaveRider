@@ -7,9 +7,9 @@ const props = defineProps<{
 }>()
 
 const statusText = computed(() => {
-  if (props.progress < 0.5) return 'Analyzing audio...'
-  if (props.progress < 0.9) return 'Generating track...'
-  return 'Preparing...'
+  if (props.progress < 0.68) return 'Analyzing audio...'
+  if (props.progress < 0.99) return 'Generating track...'
+  return 'Ready'
 })
 
 const pct = computed(() => Math.round(props.progress * 100))

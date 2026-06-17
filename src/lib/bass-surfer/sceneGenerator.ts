@@ -269,20 +269,39 @@ export class RetrowaveScene {
     this.scene.add(this.camera)
   }
 
-  public async prepareScene(wantAnimation = false) {
+  /**
+   * Builds the scene. `onProgress` (0..1) is reported across the build steps so
+   * callers can fold scene loading into a loading bar; a paint yield is inserted
+   * around the heavy steps so the bar actually advances on screen and the first
+   * frame is ready before gameplay is revealed.
+   */
+  public async prepareScene(wantAnimation = false, onProgress?: (p: number) => void) {
+    const report = (p: number) => onProgress?.(p)
+    const yieldFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()))
+
     this.ensureDefaultHeightTexture()
     this.autoAdjustOnResize()
     this.addControls()
     this.setPostProcessing()
     this.addSkybox()
-    await this.addSvgGraphics()
+    report(0.15)
+    await yieldFrame()
+
+    await this.addSvgGraphics() // heaviest: fetches + parses the SVG assets
+    report(0.55)
+    await yieldFrame()
+
     this.addFloor()
     this.addSidewalk()
     this.addRoad()
     this.addRoadLines()
+    report(0.78)
+    await yieldFrame()
+
     this.addPalmtrees()
     this.addGroupedPyramids()
     this.addPlayer()
+    report(1)
 
     if (wantAnimation) this.animate()
   }

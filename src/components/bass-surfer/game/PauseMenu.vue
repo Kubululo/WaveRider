@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { FrostedGlass } from '~/components/ui/frosted-glass'
+import GameOverlay from '~/components/bass-surfer/game/GameOverlay.vue'
+import WaveRiderMark from '~/components/bass-surfer/game/WaveRiderMark.vue'
 
 defineProps<{
   showDebug: boolean
@@ -14,45 +15,47 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div
-    class="absolute inset-0 flex items-center justify-center bg-black/70 backdrop-blur-sm z-[9999999]"
-  >
-    <FrostedGlass
-      container-class="relative z-50 w-[min(90vw,400px)]"
-      class="flex flex-col items-center gap-4 border border-white/10 p-8"
-      position="relative"
+  <GameOverlay z-class="z-[9999999]">
+    <WaveRiderMark class="mb-6" />
+
+    <h2
+      class="mb-6 text-4xl sm:text-5xl font-black italic uppercase tracking-[0.15em] leading-none text-white drop-shadow-[0_0_22px_rgba(0,200,255,0.6)]"
     >
-      <h2 class="text-4xl font-black text-white italic tracking-widest mb-4 -skew-x-6">PAUSED</h2>
+      Paused
+    </h2>
+
+    <div class="flex flex-col gap-3">
       <button
         @click="emit('resume')"
-        class="w-full py-3 bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-black text-xl uppercase tracking-widest hover:scale-105 transition-transform"
+        class="w-full rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 py-3.5 text-xl font-black uppercase tracking-widest text-white shadow-[0_0_24px_rgba(0,200,255,0.4)] transition-transform hover:scale-[1.03]"
       >
-        RESUME
+        Resume
       </button>
       <button
         @click="emit('restart')"
-        class="w-full py-3 bg-gradient-to-r from-pink-600 to-purple-600 text-white font-black text-xl uppercase tracking-widest hover:scale-105 transition-transform"
+        class="w-full rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 py-3 font-black uppercase tracking-widest text-white shadow-[0_0_20px_rgba(255,0,255,0.35)] transition-transform hover:scale-[1.03]"
       >
-        RESTART
+        Restart
       </button>
       <button
         @click="emit('exit')"
-        class="w-full py-3 border border-white/20 text-white/70 font-bold text-lg uppercase tracking-widest hover:text-white hover:border-white/40 transition-all"
+        class="w-full rounded-xl border border-white/15 py-2.5 font-bold uppercase tracking-widest text-white/55 transition-all hover:border-white/40 hover:text-white"
       >
-        EXIT
+        Exit
       </button>
-      <button
-        v-if="hasAnalysis"
-        @click="emit('toggleDebug')"
-        class="mt-2 text-xs px-3 py-1 border font-bold uppercase transition-all"
-        :class="
-          showDebug
-            ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400'
-            : 'border-gray-700 text-gray-500 hover:text-cyan-400'
-        "
-      >
-        DEBUG {{ showDebug ? 'ON' : 'OFF' }}
-      </button>
-    </FrostedGlass>
-  </div>
+    </div>
+
+    <button
+      v-if="hasAnalysis"
+      @click="emit('toggleDebug')"
+      class="mt-5 rounded-lg border px-3 py-1 text-[11px] font-bold uppercase tracking-widest transition-all"
+      :class="
+        showDebug
+          ? 'border-cyan-500 bg-cyan-500/20 text-cyan-400'
+          : 'border-white/15 text-white/40 hover:text-cyan-400'
+      "
+    >
+      Debug {{ showDebug ? 'On' : 'Off' }}
+    </button>
+  </GameOverlay>
 </template>

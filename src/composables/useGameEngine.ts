@@ -34,6 +34,16 @@ function debugColor(key: string): string {
   return '#9ca3af'
 }
 
+/** Lifecycle hooks the host wires to the loading bar / screen transition. */
+export interface GameEngineHooks {
+  /** Scene build progress, 0..1. */
+  onProgress?: (p: number) => void
+  /** Fired once the scene is built and the first frame has rendered. */
+  onReady?: () => void
+}
+
+const COUNTDOWN_FROM = 3
+
 /**
  * The playable core of WaveRider: owns the Three.js scene, the audio clock, the
  * requestAnimationFrame loop, orb collision + scoring, and the optional debug
@@ -41,7 +51,11 @@ function debugColor(key: string): string {
  * handler; the host component just renders the returned state and wires buttons
  * to the returned controls.
  */
-export function useGameEngine(opts: GameEngineOptions, canvasRef: Ref<HTMLDivElement | null>) {
+export function useGameEngine(
+  opts: GameEngineOptions,
+  canvasRef: Ref<HTMLDivElement | null>,
+  hooks: GameEngineHooks = {}
+) {
   // --- Reactive state surfaced to the UI ---
   const isPlaying = ref(false)
   const gameEnded = ref(false)
@@ -51,6 +65,8 @@ export function useGameEngine(opts: GameEngineOptions, canvasRef: Ref<HTMLDivEle
   const currentLane = ref(0)
   const playerX = ref(0)
   const touchFlash = ref<'left' | 'right' | null>(null)
+  // Pre-roll countdown: null when idle, else the number on screen (3 → 1).
+  const countdown = ref<number | null>(null)
 
   const score = ref<GameScore>({
     score: 0,
@@ -83,9 +99,38 @@ export function useGameEngine(opts: GameEngineOptions, canvasRef: Ref<HTMLDivEle
   let playerYaw = 0
   let rafId = 0
   let touchFlashTimer: ReturnType<typeof setTimeout> | null = null
+  let countdownTimer: ReturnType<typeof setTimeout> | null = null
+  // Gates the audio clock: false during the pre-roll countdown so the scene
+  // holds on frame 0 instead of racing ahead (or ending) before playback starts.
+  let playbackStarted = false
+
+  function clearCountdown() {
+    if (countdownTimer) {
+      clearTimeout(countdownTimer)
+      countdownTimer = null
+    }
+    countdown.value = null
+  }
+
+  // Counts 3 → 2 → 1 (1s each), then runs onComplete — a ~3s pre-roll.
+  function runCountdown(onComplete: () => void) {
+    clearCountdown()
+    countdown.value = COUNTDOWN_FROM
+    const step = () => {
+      if (countdown.value === null) return
+      if (countdown.value > 1) {
+        countdown.value -= 1
+        countdownTimer = setTimeout(step, 1000)
+      } else {
+        clearCountdown()
+        onComplete()
+      }
+    }
+    countdownTimer = setTimeout(step, 1000)
+  }
 
   function moveLane(delta: -1 | 1) {
-    if (isPaused.value || !isPlaying.value) return
+    if (isPaused.value || !isPlaying.value || countdown.value !== null) return
     currentLane.value = Math.max(-1, Math.min(1, currentLane.value + delta))
 
     touchFlash.value = delta < 0 ? 'left' : 'right'
@@ -124,7 +169,7 @@ export function useGameEngine(opts: GameEngineOptions, canvasRef: Ref<HTMLDivEle
     let progress = lastProgress
     let elapsed = 0
 
-    if (isPlaying.value && !isPaused.value && audioCtx) {
+    if (isPlaying.value && !isPaused.value && playbackStarted && audioCtx) {
       const outputLatency = audioCtx.outputLatency || audioCtx.baseLatency || 0
       elapsed = Math.max(0, audioCtx.currentTime - startTime - outputLatency)
 
@@ -207,11 +252,17 @@ export function useGameEngine(opts: GameEngineOptions, canvasRef: Ref<HTMLDivEle
       sceneManager.playerGroup.rotation.z = -Math.atan(bank)
     }
 
-    if (isPlaying.value && !isPaused.value && !opts.zenMode) {
+    if (isPlaying.value && !isPaused.value && playbackStarted && !opts.zenMode) {
       sceneManager.updateCollectibles(elapsed)
     }
 
-    if (isPlaying.value && !isPaused.value && !opts.zenMode && sceneManager.playerGroup) {
+    if (
+      isPlaying.value &&
+      !isPaused.value &&
+      playbackStarted &&
+      !opts.zenMode &&
+      sceneManager.playerGroup
+    ) {
       const collectibles = sceneManager.getCollectibles()
       const playerZ = sceneManager.playerGroup!.position.z
 
@@ -283,10 +334,9 @@ export function useGameEngine(opts: GameEngineOptions, canvasRef: Ref<HTMLDivEle
     sourceNode.buffer = opts.audioBuffer
     sourceNode.connect(audioCtx.destination)
 
-    startTime = audioCtx.currentTime + 0.1
     lastProgress = 0
     lastScrollOffset = 0
-    sourceNode.start(startTime)
+    playbackStarted = false
 
     sourceNode.onended = () => {
       if (isPlaying.value && !gameEnded.value) endGame()
@@ -299,6 +349,16 @@ export function useGameEngine(opts: GameEngineOptions, canvasRef: Ref<HTMLDivEle
     isPlaying.value = true
     gameEnded.value = false
     isPaused.value = false
+
+    // Hold the scene on frame 0 through a 3-2-1 pre-roll, then drop the needle.
+    runCountdown(beginPlayback)
+  }
+
+  function beginPlayback() {
+    if (!audioCtx || !sourceNode) return
+    startTime = audioCtx.currentTime + 0.1
+    sourceNode.start(startTime)
+    playbackStarted = true
   }
 
   function endGame() {
@@ -316,7 +376,7 @@ export function useGameEngine(opts: GameEngineOptions, canvasRef: Ref<HTMLDivEle
   }
 
   function togglePause() {
-    if (!isPlaying.value || gameEnded.value) return
+    if (!isPlaying.value || gameEnded.value || countdown.value !== null) return
     if (isPaused.value) {
       resumeGame()
     } else {
@@ -332,13 +392,19 @@ export function useGameEngine(opts: GameEngineOptions, canvasRef: Ref<HTMLDivEle
   }
 
   function resumeGame() {
-    isPaused.value = false
-    if (audioCtx && audioCtx.state === 'suspended') {
-      audioCtx.resume()
-    }
+    if (countdown.value !== null) return
+    // Count back in before un-suspending the audio; the scene stays frozen on
+    // the paused frame (isPaused holds) until the count reaches zero.
+    runCountdown(() => {
+      isPaused.value = false
+      if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume()
+      }
+    })
   }
 
   function restartGame() {
+    clearCountdown()
     isPaused.value = false
     isPlaying.value = false
     gameEnded.value = false
@@ -362,6 +428,7 @@ export function useGameEngine(opts: GameEngineOptions, canvasRef: Ref<HTMLDivEle
 
   function cleanup() {
     cancelAnimationFrame(rafId)
+    clearCountdown()
     if (sourceNode) {
       try {
         sourceNode.stop()
@@ -395,7 +462,7 @@ export function useGameEngine(opts: GameEngineOptions, canvasRef: Ref<HTMLDivEle
         sceneManager.latency = 0.0
       }
 
-      await sceneManager.prepareScene(false)
+      await sceneManager.prepareScene(false, hooks.onProgress)
 
       if (opts.trackData.segments && !opts.zenMode) {
         sceneManager.spawnCollectibles(opts.trackData.segments, opts.audioBuffer.duration)
@@ -404,7 +471,14 @@ export function useGameEngine(opts: GameEngineOptions, canvasRef: Ref<HTMLDivEle
         ).length
       }
 
+      // Paint the first frame before declaring ready so the reveal shows the
+      // built scene rather than a blank canvas.
+      sceneManager.renderFrame()
+      hooks.onReady?.()
+
       tick()
+    } else {
+      hooks.onReady?.()
     }
   })
 
@@ -421,6 +495,7 @@ export function useGameEngine(opts: GameEngineOptions, canvasRef: Ref<HTMLDivEle
     currentTimeDisplay,
     currentLane,
     touchFlash,
+    countdown,
     score,
     displayScore,
     showDebug,
