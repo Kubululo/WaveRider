@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+/// <reference types="unplugin-icons/types/vue" />
 
 // Pulls in Vite's ambient module declarations — including the one for
 // side-effect CSS imports like `import './css/main.css'` in main.ts — plus

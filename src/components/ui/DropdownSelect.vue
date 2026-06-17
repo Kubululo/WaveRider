@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import IconChevronDown from '~icons/lucide/chevron-down'
 
 export interface DropdownOption {
   value: string | null
@@ -44,16 +45,10 @@ function select(value: string | null) {
         "
       >
         <span>{{ currentLabel }}</span>
-        <svg
+        <IconChevronDown
           class="h-3 w-3 shrink-0 transition-transform"
           :class="open ? 'rotate-180' : ''"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2.5"
-        >
-          <path stroke-linecap="round" stroke-linejoin="round" d="m6 9 6 6 6-6" />
-        </svg>
+        />
       </button>
 
       <!-- Backdrop closes on outside click -->

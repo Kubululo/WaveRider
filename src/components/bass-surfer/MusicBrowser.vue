@@ -11,6 +11,7 @@ import {
   type SearchSort,
 } from '~/lib/bass-surfer/audius'
 import DropdownSelect, { type DropdownOption } from '~/components/ui/DropdownSelect.vue'
+import IconSearch from '~icons/lucide/search'
 
 const emit = defineEmits<{
   selectFile: [file: File, title: string]
@@ -161,16 +162,9 @@ onUnmounted(stopPreview)
   <div class="flex h-full min-h-0 flex-col gap-4">
     <!-- Search -->
     <div class="relative">
-      <svg
+      <IconSearch
         class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-      >
-        <circle cx="11" cy="11" r="7" />
-        <path stroke-linecap="round" d="m20 20-3.5-3.5" />
-      </svg>
+      />
       <input
         v-model="query"
         type="text"

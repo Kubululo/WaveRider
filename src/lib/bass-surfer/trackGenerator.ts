@@ -90,7 +90,7 @@ const GENERATOR_CONFIG = {
     WORLD_SPEED: 30, // Forward world units/sec — must match RetrowaveScene.animationSpeed
     // Superelevation: the road surface rolls into curves like a bullet train,
     // proportional to the current heading, easing in/out via the EMA.
-    BANK_MAX_DEG: 6, // Maximum lean of the road surface
+    BANK_MAX_DEG: 5, // Maximum lean of the road surface
     // Heading fraction (of STEER_ANGLE) at which the bank saturates. The
     // spring system means heading peaks mid-transition at roughly half the
     // steer angle and decays to ~0 once a curve settles — normalizing by the
@@ -429,7 +429,9 @@ export function generateTrack(analysis: AudioAnalysis, variationSeed?: string): 
 
     // Bank into the curve (superelevation): proportional to heading, eased by
     // EMA so the road rolls in and out of the lean like a train on a transition
-    const bankNorm = heading / (steerHeadingRad * curve.BANK_FULL_AT)
+    // curve. Negated vs. heading so the INSIDE edge of the turn drops (lean in)
+    // rather than the outside — a left curve must roll the road down to the left.
+    const bankNorm = -heading / (steerHeadingRad * curve.BANK_FULL_AT)
     const targetBank = Math.max(-1, Math.min(1, bankNorm)) * maxBankRad
     currentBanking += (targetBank - currentBanking) * curve.BANK_SMOOTHING
 
