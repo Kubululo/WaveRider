@@ -16,7 +16,7 @@ const pct = computed(() => Math.round(props.progress * 100))
 </script>
 
 <template>
-  <div class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-black/90">
+  <div class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#06010c]">
     <div class="flex flex-col items-center gap-6 px-6 text-center">
       <h2 class="text-2xl font-bold text-white">{{ songTitle }}</h2>
 

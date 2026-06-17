@@ -223,11 +223,6 @@ async function buildShareImage(): Promise<Blob | null> {
     px += pw + gap
   })
 
-  // Footer call-to-action.
-  ctx.font = '700 24px Arial, sans-serif'
-  ctx.fillStyle = 'rgba(255,255,255,0.4)'
-  ctx.fillText('Play free · waverider', S / 2, S - 42)
-
   return new Promise((resolve) => canvas.toBlob((b) => resolve(b), 'image/png'))
 }
 

@@ -43,6 +43,9 @@ export interface GameEngineHooks {
 }
 
 const COUNTDOWN_FROM = 3
+// Quick fade so the music doesn't pop in at the end of the lead-in (and again on
+// resume).
+const MUSIC_FADE_IN = 0.2
 
 /**
  * The playable core of WaveRider: owns the Three.js scene, the audio clock, the
@@ -78,6 +81,12 @@ export function useGameEngine(
   })
   const displayScore = ref(0)
 
+  // Track timeline: a silent intro lead-in precedes the audio. `progress` (0..1)
+  // and the scene span the whole thing; the audio is scheduled to begin exactly
+  // at the intro→audio seam so picture and sound stay locked with no snap.
+  const introDuration = opts.trackData.introDuration ?? 0
+  const totalDuration = opts.trackData.duration || opts.audioBuffer.duration
+
   // --- Debug stream ---
   const showDebug = ref(false)
   const debugEntries = ref<DebugEntry[]>([])
@@ -91,6 +100,7 @@ export function useGameEngine(
   let sceneManager: RetrowaveScene | null = null
   let audioCtx: AudioContext | null = null
   let sourceNode: AudioBufferSourceNode | null = null
+  let gainNode: GainNode | null = null
   let startTime = 0
   let lastProgress = 0
   // Scroll distance (world units) resolved last frame, for swept orb collision.
@@ -100,9 +110,6 @@ export function useGameEngine(
   let rafId = 0
   let touchFlashTimer: ReturnType<typeof setTimeout> | null = null
   let countdownTimer: ReturnType<typeof setTimeout> | null = null
-  // Gates the audio clock: false during the pre-roll countdown so the scene
-  // holds on frame 0 instead of racing ahead (or ending) before playback starts.
-  let playbackStarted = false
 
   function clearCountdown() {
     if (countdownTimer) {
@@ -112,10 +119,10 @@ export function useGameEngine(
     countdown.value = null
   }
 
-  // Counts 3 → 2 → 1 (1s each), then runs onComplete — a ~3s pre-roll.
-  function runCountdown(onComplete: () => void) {
+  // Counts `from` → 1 (1s each), then runs onComplete.
+  function runCountdown(from: number, onComplete: () => void) {
     clearCountdown()
-    countdown.value = COUNTDOWN_FROM
+    countdown.value = Math.max(1, Math.round(from))
     const step = () => {
       if (countdown.value === null) return
       if (countdown.value > 1) {
@@ -169,22 +176,29 @@ export function useGameEngine(
     let progress = lastProgress
     let elapsed = 0
 
-    if (isPlaying.value && !isPaused.value && playbackStarted && audioCtx) {
+    if (isPlaying.value && !isPaused.value && audioCtx) {
       const outputLatency = audioCtx.outputLatency || audioCtx.baseLatency || 0
+      // Track clock: 0 → totalDuration. The first `introDuration` seconds are the
+      // silent intro the player rides during the countdown; the audio is
+      // scheduled to start at the seam, so this single clock stays in sync.
       elapsed = Math.max(0, audioCtx.currentTime - startTime - outputLatency)
 
-      if (elapsed > opts.audioBuffer.duration) {
+      if (elapsed > totalDuration) {
         endGame()
       } else {
-        const m = Math.floor(elapsed / 60)
-        const s = Math.floor(elapsed % 60)
+        // Song-relative time (negative through the intro) drives the HUD clock
+        // and the analysis debug readout.
+        const songTime = elapsed - introDuration
+        const shown = Math.max(0, songTime)
+        const m = Math.floor(shown / 60)
+        const s = Math.floor(shown % 60)
           .toString()
           .padStart(2, '0')
         currentTimeDisplay.value = `${m}:${s}`
-        progress = Math.max(0, Math.min(1, elapsed / opts.audioBuffer.duration))
+        progress = Math.min(1, elapsed / totalDuration)
         lastProgress = progress
 
-        if (showDebug.value) {
+        if (showDebug.value && songTime >= 0) {
           fpsFrameCount++
           const now = performance.now()
           if (now - fpsLastTime >= 500) {
@@ -195,7 +209,7 @@ export function useGameEngine(
 
           if (opts.analysis?.frames) {
             const analysisFPS = opts.analysis.frames.length / opts.analysis.duration
-            const fIdx = Math.max(0, Math.floor(elapsed * analysisFPS))
+            const fIdx = Math.max(0, Math.floor(songTime * analysisFPS))
             if (fIdx < opts.analysis.frames.length) {
               const frame = opts.analysis.frames[fIdx] as unknown as Record<string, number>
               const entries: DebugEntry[] = []
@@ -252,17 +266,11 @@ export function useGameEngine(
       sceneManager.playerGroup.rotation.z = -Math.atan(bank)
     }
 
-    if (isPlaying.value && !isPaused.value && playbackStarted && !opts.zenMode) {
+    if (isPlaying.value && !isPaused.value && !opts.zenMode) {
       sceneManager.updateCollectibles(elapsed)
     }
 
-    if (
-      isPlaying.value &&
-      !isPaused.value &&
-      playbackStarted &&
-      !opts.zenMode &&
-      sceneManager.playerGroup
-    ) {
+    if (isPlaying.value && !isPaused.value && !opts.zenMode && sceneManager.playerGroup) {
       const collectibles = sceneManager.getCollectibles()
       const playerZ = sceneManager.playerGroup!.position.z
 
@@ -330,35 +338,39 @@ export function useGameEngine(
     audioCtx = new AudioContext()
     await audioCtx.resume()
 
+    gainNode = audioCtx.createGain()
+    gainNode.connect(audioCtx.destination)
+
     sourceNode = audioCtx.createBufferSource()
     sourceNode.buffer = opts.audioBuffer
-    sourceNode.connect(audioCtx.destination)
+    sourceNode.connect(gainNode)
+
+    // The track clock starts now; the player rides the silent intro for
+    // `introDuration` seconds, then the audio begins at the seam with a quick
+    // fade-in. Same single clock → no snap when the music drops.
+    startTime = audioCtx.currentTime + 0.1
+    const audioStart = startTime + introDuration
+    gainNode.gain.setValueAtTime(0, audioStart)
+    gainNode.gain.linearRampToValueAtTime(1, audioStart + MUSIC_FADE_IN)
+    sourceNode.start(audioStart)
 
     lastProgress = 0
     lastScrollOffset = 0
-    playbackStarted = false
 
     sourceNode.onended = () => {
       if (isPlaying.value && !gameEnded.value) endGame()
     }
 
     if (sceneManager && opts.trackData.segments && !opts.zenMode) {
-      sceneManager.spawnCollectibles(opts.trackData.segments, opts.audioBuffer.duration)
+      sceneManager.spawnCollectibles(opts.trackData.segments, totalDuration)
     }
 
     isPlaying.value = true
     gameEnded.value = false
     isPaused.value = false
 
-    // Hold the scene on frame 0 through a 3-2-1 pre-roll, then drop the needle.
-    runCountdown(beginPlayback)
-  }
-
-  function beginPlayback() {
-    if (!audioCtx || !sourceNode) return
-    startTime = audioCtx.currentTime + 0.1
-    sourceNode.start(startTime)
-    playbackStarted = true
+    // Visual count over the silent intro, ending as the audio drops.
+    runCountdown(introDuration, () => {})
   }
 
   function endGame() {
@@ -395,10 +407,17 @@ export function useGameEngine(
     if (countdown.value !== null) return
     // Count back in before un-suspending the audio; the scene stays frozen on
     // the paused frame (isPaused holds) until the count reaches zero.
-    runCountdown(() => {
+    runCountdown(COUNTDOWN_FROM, () => {
       isPaused.value = false
       if (audioCtx && audioCtx.state === 'suspended') {
         audioCtx.resume()
+        // Match the start fade so the music eases back in instead of snapping.
+        if (gainNode) {
+          const t = audioCtx.currentTime
+          gainNode.gain.cancelScheduledValues(t)
+          gainNode.gain.setValueAtTime(0, t)
+          gainNode.gain.linearRampToValueAtTime(1, t + MUSIC_FADE_IN)
+        }
       }
     })
   }
@@ -422,6 +441,7 @@ export function useGameEngine(
       } catch {}
       audioCtx = null
     }
+    gainNode = null
 
     startGame()
   }
@@ -440,6 +460,7 @@ export function useGameEngine(
         if (audioCtx.state !== 'closed') audioCtx.close()
       } catch {}
     }
+    gainNode = null
     sceneManager?.destroy()
     sceneManager = null
   }
@@ -458,14 +479,14 @@ export function useGameEngine(
         const heights = opts.trackData.segments.map((s) => s.y)
         const centers = opts.trackData.segments.map((s) => s.centerX)
         const rolls = opts.trackData.segments.map((s) => s.roll || 0)
-        sceneManager.setTrackData(heights, centers, rolls, opts.audioBuffer.duration)
+        sceneManager.setTrackData(heights, centers, rolls, totalDuration)
         sceneManager.latency = 0.0
       }
 
       await sceneManager.prepareScene(false, hooks.onProgress)
 
       if (opts.trackData.segments && !opts.zenMode) {
-        sceneManager.spawnCollectibles(opts.trackData.segments, opts.audioBuffer.duration)
+        sceneManager.spawnCollectibles(opts.trackData.segments, totalDuration)
         score.value.collectiblesTotal = opts.trackData.segments.filter(
           (s) => s.collectible !== null
         ).length
