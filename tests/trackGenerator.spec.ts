@@ -67,10 +67,13 @@ describe('generateTrack', () => {
     }
   })
 
-  it('segment count equals floor(duration × 60)', () => {
-    // MESH_FPS is 60 in GENERATOR_CONFIG
+  it('segment count equals intro + floor(duration × 60)', () => {
+    // MESH_FPS is 60; the track is prefixed with a silent intro lead-in whose
+    // length is reported as introDuration.
     const result = generateTrack(makeAnalysis(300, 5))
-    expect(result.segments.length).toBe(Math.floor(5 * 60))
+    const introSegs = Math.round((result.introDuration ?? 0) * 60)
+    expect(introSegs).toBeGreaterThan(0)
+    expect(result.segments.length).toBe(introSegs + Math.floor(5 * 60))
   })
 
   it('totalLength equals segments.length × 8 (SEGMENT_DEPTH)', () => {

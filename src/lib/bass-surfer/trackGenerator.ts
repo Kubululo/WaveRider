@@ -11,6 +11,13 @@ const GENERATOR_CONFIG = {
   SEGMENT_DEPTH: 8,
   BASE_WIDTH: 30,
 
+  // Silent lead-in prepended before the audio-driven track: a real stretch of
+  // curving road (no beat bumps, no orbs) the player rides before the music
+  // drops, so it starts seamlessly instead of the track snapping to the
+  // beginning. Long enough to cover the start splash (~1.6s) plus the visible
+  // 3-2-1 countdown that follows it (see useGameEngine: splash + COUNTDOWN_FROM).
+  INTRO_SECONDS: 4.6,
+
   // 1. Thresholds (0.0 to 1.0)
   THRESHOLDS: {
     BASS: 0.45,
@@ -90,7 +97,7 @@ const GENERATOR_CONFIG = {
     WORLD_SPEED: 30, // Forward world units/sec — must match RetrowaveScene.animationSpeed
     // Superelevation: the road surface rolls into curves like a bullet train,
     // proportional to the current heading, easing in/out via the EMA.
-    BANK_MAX_DEG: 6, // Maximum lean of the road surface
+    BANK_MAX_DEG: 5, // Maximum lean of the road surface
     // Heading fraction (of STEER_ANGLE) at which the bank saturates. The
     // spring system means heading peaks mid-transition at roughly half the
     // steer angle and decays to ~0 once a curve settles — normalizing by the
@@ -308,27 +315,44 @@ export function generateTrack(analysis: AudioAnalysis, variationSeed?: string): 
   // -- MELODIC DRIVER (mids vs highs, per section) --
   const melodicDriver = detectMelodicDriver(frames, GENERATOR_CONFIG.MESH_FPS)
 
+  // The road is built as [intro | audio]. Intro segments only run the curvature
+  // + baseline integrators (no audio sampling, no bumps, no orbs); the audio
+  // track is sampled by the offset index so the seam is geometrically continuous
+  // and the very first beat lands exactly at the intro→audio boundary.
+  const introSegments = Math.round(GENERATOR_CONFIG.INTRO_SECONDS * GENERATOR_CONFIG.MESH_FPS)
+  const fullSegments = introSegments + totalSegments
   const framesPerSegment = frames.length / totalSegments
 
-  for (let i = 0; i < totalSegments; i++) {
-    // Flux onsets are single-frame spikes; sampling one frame per segment can
-    // skip frames entirely due to rounding. Take the max over the segment's range.
-    const frameStart = Math.min(Math.floor(i * framesPerSegment), frames.length - 1)
-    const frameEnd = Math.min(
-      Math.max(frameStart + 1, Math.floor((i + 1) * framesPerSegment)),
-      frames.length
-    )
+  for (let i = 0; i < fullSegments; i++) {
+    const inIntro = i < introSegments
 
     let fluxBass = 0
     let fluxMids = 0
     let fluxHighs = 0
-    for (let f = frameStart; f < frameEnd; f++) {
-      if (frames[f].spectralFluxBass > fluxBass) fluxBass = frames[f].spectralFluxBass
-      if (frames[f].spectralFluxMids > fluxMids) fluxMids = frames[f].spectralFluxMids
-      if (frames[f].spectralFluxHighs > fluxHighs) fluxHighs = frames[f].spectralFluxHighs
-    }
+    let energyNorm = 0
+    let highsDrive = false
 
-    const frame = frames[frameStart]
+    if (!inIntro) {
+      // Audio-relative segment index (0 at the seam).
+      const a = i - introSegments
+      // Flux onsets are single-frame spikes; sampling one frame per segment can
+      // skip frames entirely due to rounding. Take the max over the segment's range.
+      const frameStart = Math.min(Math.floor(a * framesPerSegment), frames.length - 1)
+      const frameEnd = Math.min(
+        Math.max(frameStart + 1, Math.floor((a + 1) * framesPerSegment)),
+        frames.length
+      )
+
+      for (let f = frameStart; f < frameEnd; f++) {
+        if (frames[f].spectralFluxBass > fluxBass) fluxBass = frames[f].spectralFluxBass
+        if (frames[f].spectralFluxMids > fluxMids) fluxMids = frames[f].spectralFluxMids
+        if (frames[f].spectralFluxHighs > fluxHighs) fluxHighs = frames[f].spectralFluxHighs
+      }
+
+      const frame = frames[frameStart]
+      energyNorm = maxEnergy > 0 ? frame.energy / maxEnergy : 0
+      highsDrive = melodicDriver[frameStart] === DRIVER_HIGHS
+    }
 
     const currentTimeMs = (i / GENERATOR_CONFIG.MESH_FPS) * 1000
 
@@ -336,55 +360,56 @@ export function generateTrack(analysis: AudioAnalysis, variationSeed?: string): 
     let spawnCollectible = false
 
     // ---------------------------------------------------------
-    // 1. AUDIO ANALYSIS (DETERMINE BEAT JUMPS)
+    // 1. AUDIO ANALYSIS (DETERMINE BEAT JUMPS) — skipped during the intro
     // ---------------------------------------------------------
     // Priority chain: bass wins (punch-gated in the analyzer), then whichever
     // melodic band drives the current section, then the other. Each band only
     // has to beat its OWN threshold. (Requiring a band to also be the global
     // max meant a sub-threshold bass flux could starve valid mid/high hits.)
+    if (!inIntro) {
+      const canMid = fluxMids > GENERATOR_CONFIG.THRESHOLDS.MID && currentTimeMs >= nextAllowedMid
+      const canHigh =
+        fluxHighs > GENERATOR_CONFIG.THRESHOLDS.HIGH && currentTimeMs >= nextAllowedHigh
 
-    const highsDrive = melodicDriver[frameStart] === DRIVER_HIGHS
-    const canMid = fluxMids > GENERATOR_CONFIG.THRESHOLDS.MID && currentTimeMs >= nextAllowedMid
-    const canHigh = fluxHighs > GENERATOR_CONFIG.THRESHOLDS.HIGH && currentTimeMs >= nextAllowedHigh
+      // A. CHECK BASS
+      if (fluxBass > GENERATOR_CONFIG.THRESHOLDS.BASS && currentTimeMs >= nextAllowedBass) {
+        targetJump = fluxBass * GENERATOR_CONFIG.INTENSITY.BASS
 
-    // A. CHECK BASS
-    if (fluxBass > GENERATOR_CONFIG.THRESHOLDS.BASS && currentTimeMs >= nextAllowedBass) {
-      targetJump = fluxBass * GENERATOR_CONFIG.INTENSITY.BASS
+        nextAllowedBass = currentTimeMs + GENERATOR_CONFIG.COOLDOWNS.BASS_TRIGGER.BLOCK_BASS
+        nextAllowedMid = currentTimeMs + GENERATOR_CONFIG.COOLDOWNS.BASS_TRIGGER.BLOCK_MID
+        nextAllowedHigh = currentTimeMs + GENERATOR_CONFIG.COOLDOWNS.BASS_TRIGGER.BLOCK_HIGH
+      }
 
-      nextAllowedBass = currentTimeMs + GENERATOR_CONFIG.COOLDOWNS.BASS_TRIGGER.BLOCK_BASS
-      nextAllowedMid = currentTimeMs + GENERATOR_CONFIG.COOLDOWNS.BASS_TRIGGER.BLOCK_MID
-      nextAllowedHigh = currentTimeMs + GENERATOR_CONFIG.COOLDOWNS.BASS_TRIGGER.BLOCK_HIGH
-    }
+      // B. CHECK MID (Potential Collectible) — yields to highs when highs drive the section
+      else if (canMid && (!highsDrive || !canHigh)) {
+        targetJump = fluxMids * GENERATOR_CONFIG.INTENSITY.MID
+        spawnCollectible = true
 
-    // B. CHECK MID (Potential Collectible) — yields to highs when highs drive the section
-    else if (canMid && (!highsDrive || !canHigh)) {
-      targetJump = fluxMids * GENERATOR_CONFIG.INTENSITY.MID
-      spawnCollectible = true
+        nextAllowedBass = currentTimeMs + GENERATOR_CONFIG.COOLDOWNS.MID_TRIGGER.BLOCK_BASS
+        nextAllowedMid = currentTimeMs + GENERATOR_CONFIG.COOLDOWNS.MID_TRIGGER.BLOCK_MID
+        nextAllowedHigh = currentTimeMs + GENERATOR_CONFIG.COOLDOWNS.MID_TRIGGER.BLOCK_HIGH
+      }
 
-      nextAllowedBass = currentTimeMs + GENERATOR_CONFIG.COOLDOWNS.MID_TRIGGER.BLOCK_BASS
-      nextAllowedMid = currentTimeMs + GENERATOR_CONFIG.COOLDOWNS.MID_TRIGGER.BLOCK_MID
-      nextAllowedHigh = currentTimeMs + GENERATOR_CONFIG.COOLDOWNS.MID_TRIGGER.BLOCK_HIGH
-    }
+      // C. CHECK HIGH (Potential Collectible)
+      else if (canHigh) {
+        targetJump = fluxHighs * GENERATOR_CONFIG.INTENSITY.HIGH
+        spawnCollectible = true
 
-    // C. CHECK HIGH (Potential Collectible)
-    else if (canHigh) {
-      targetJump = fluxHighs * GENERATOR_CONFIG.INTENSITY.HIGH
-      spawnCollectible = true
+        nextAllowedBass = currentTimeMs + GENERATOR_CONFIG.COOLDOWNS.HIGH_TRIGGER.BLOCK_BASS
+        nextAllowedMid = currentTimeMs + GENERATOR_CONFIG.COOLDOWNS.HIGH_TRIGGER.BLOCK_MID
+        nextAllowedHigh = currentTimeMs + GENERATOR_CONFIG.COOLDOWNS.HIGH_TRIGGER.BLOCK_HIGH
+      }
 
-      nextAllowedBass = currentTimeMs + GENERATOR_CONFIG.COOLDOWNS.HIGH_TRIGGER.BLOCK_BASS
-      nextAllowedMid = currentTimeMs + GENERATOR_CONFIG.COOLDOWNS.HIGH_TRIGGER.BLOCK_MID
-      nextAllowedHigh = currentTimeMs + GENERATOR_CONFIG.COOLDOWNS.HIGH_TRIGGER.BLOCK_HIGH
-    }
-
-    // Gate collectibles by their own minimum interval, separate from the beat
-    // cooldowns: the bump above still happens on the beat, but the orb is only
-    // kept if enough time has passed since the last one — otherwise orbs could
-    // stack a few frames apart when the mid/high block times are tuned low.
-    if (spawnCollectible) {
-      if (currentTimeMs < nextAllowedCollectible) {
-        spawnCollectible = false
-      } else {
-        nextAllowedCollectible = currentTimeMs + GENERATOR_CONFIG.COLLECTIBLE.MIN_INTERVAL_MS
+      // Gate collectibles by their own minimum interval, separate from the beat
+      // cooldowns: the bump above still happens on the beat, but the orb is only
+      // kept if enough time has passed since the last one — otherwise orbs could
+      // stack a few frames apart when the mid/high block times are tuned low.
+      if (spawnCollectible) {
+        if (currentTimeMs < nextAllowedCollectible) {
+          spawnCollectible = false
+        } else {
+          nextAllowedCollectible = currentTimeMs + GENERATOR_CONFIG.COLLECTIBLE.MIN_INTERVAL_MS
+        }
       }
     }
 
@@ -393,9 +418,8 @@ export function generateTrack(analysis: AudioAnalysis, variationSeed?: string): 
     currentJumpY = Math.max(currentJumpY, targetJump)
 
     // ---------------------------------------------------------
-    // 2. BASELINE TERRAIN (Follows overall loudness via EMA)
+    // 2. BASELINE TERRAIN (Follows overall loudness via EMA) — flat in intro
     // ---------------------------------------------------------
-    const energyNorm = maxEnergy > 0 ? frame.energy / maxEnergy : 0
     baselineY +=
       (energyNorm * GENERATOR_CONFIG.BASELINE.HEIGHT - baselineY) *
       GENERATOR_CONFIG.BASELINE.SMOOTHING
@@ -429,7 +453,9 @@ export function generateTrack(analysis: AudioAnalysis, variationSeed?: string): 
 
     // Bank into the curve (superelevation): proportional to heading, eased by
     // EMA so the road rolls in and out of the lean like a train on a transition
-    const bankNorm = heading / (steerHeadingRad * curve.BANK_FULL_AT)
+    // curve. Negated vs. heading so the INSIDE edge of the turn drops (lean in)
+    // rather than the outside — a left curve must roll the road down to the left.
+    const bankNorm = -heading / (steerHeadingRad * curve.BANK_FULL_AT)
     const targetBank = Math.max(-1, Math.min(1, bankNorm)) * maxBankRad
     currentBanking += (targetBank - currentBanking) * curve.BANK_SMOOTHING
 
@@ -458,7 +484,9 @@ export function generateTrack(analysis: AudioAnalysis, variationSeed?: string): 
   return {
     segments,
     totalLength: segments.length * GENERATOR_CONFIG.SEGMENT_DEPTH,
-    duration,
+    // Total timeline (intro + audio); the scene maps progress 0..1 over this.
+    duration: fullSegments / GENERATOR_CONFIG.MESH_FPS,
+    introDuration: introSegments / GENERATOR_CONFIG.MESH_FPS,
     melodicDriver,
   }
 }

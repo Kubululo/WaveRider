@@ -24,15 +24,36 @@ const audioBuffer = shallowRef<AudioBuffer | null>(null)
 const audioAnalysis = shallowRef<AudioAnalysis | null>(null)
 const sceneSettings = computed(() => store.activeSettings)
 
+// The loader stays up across two phases so the jump to gameplay isn't a blank,
+// stuttering scene: audio analysis (0 → 0.7) then Three.js scene build
+// (0.7 → 1, reported by GamePlay). Gameplay is revealed only once `gameReady`.
+const gameReady = ref(false)
+const prepareProgress = ref(0)
+const showLoader = computed(
+  () => screen.value === 'analyzing' || (screen.value === 'game' && !gameReady.value)
+)
+const loadProgress = computed(() =>
+  screen.value === 'analyzing'
+    ? analyzer.analysisProgress.value * 0.7
+    : 0.7 + prepareProgress.value * 0.3
+)
+
 // Intro splash: the wordmark holds centre-screen, then dissolves to reveal the
-// real page (where the title shrinks into the fixed header). Plays once on load.
+// real page (where the title shrinks into the fixed header). Plays on load and
+// again when returning from gameplay, masking the screen swap.
 const introDone = ref(false)
-onMounted(() => {
-  setTimeout(() => (introDone.value = true), 800)
-})
+let introTimer: ReturnType<typeof setTimeout> | undefined
+function playIntro() {
+  introDone.value = false
+  clearTimeout(introTimer)
+  introTimer = setTimeout(() => (introDone.value = true), 800)
+}
+onMounted(playIntro)
 
 async function handleFileSelect(file: File, title?: string) {
   songTitle.value = title ?? file.name.replace(/\.[^/.]+$/, '')
+  gameReady.value = false
+  prepareProgress.value = 0
   screen.value = 'analyzing'
 
   try {
@@ -52,9 +73,12 @@ function handleGameClose() {
   trackData.value = null
   audioBuffer.value = null
   audioAnalysis.value = null
+  // Replay the wordmark splash so the return mirrors the initial load-in.
+  playIntro()
 }
 
 onUnmounted(() => {
+  clearTimeout(introTimer)
   analyzer.dispose()
 })
 </script>
@@ -65,7 +89,7 @@ onUnmounted(() => {
     <Transition name="dissolve">
       <div
         v-if="!introDone"
-        class="pointer-events-none fixed inset-0 z-[60] flex items-center justify-center overflow-hidden px-6 bg-[linear-gradient(180deg,#11052a_0%,#2a0a4e_55%,#06010c_100%)]"
+        class="pointer-events-none fixed inset-0 z-[100] flex items-center justify-center overflow-hidden px-6 bg-[linear-gradient(180deg,#11052a_0%,#2a0a4e_55%,#06010c_100%)]"
       >
         <!-- Soft glow behind the wordmark -->
         <div
@@ -156,16 +180,7 @@ onUnmounted(() => {
       </div>
     </Transition>
 
-    <!-- Analysis loader -->
-    <Transition name="fade">
-      <AnalysisLoader
-        v-if="screen === 'analyzing'"
-        :progress="analyzer.analysisProgress.value"
-        :song-title="songTitle"
-      />
-    </Transition>
-
-    <!-- Game screen -->
+    <!-- Game screen (mounts under the loader so the scene builds before reveal) -->
     <Transition name="fade">
       <GamePlay
         v-if="screen === 'game' && trackData && audioBuffer && audioAnalysis"
@@ -177,7 +192,15 @@ onUnmounted(() => {
         :settings="sceneSettings"
         :zen-mode="store.zenMode"
         @close="handleGameClose"
+        @ready="gameReady = true"
+        @prepare-progress="prepareProgress = $event"
+        @start-intro="playIntro"
       />
+    </Transition>
+
+    <!-- Loader: spans audio analysis + scene build, on top until gameReady -->
+    <Transition name="fade">
+      <AnalysisLoader v-if="showLoader" :progress="loadProgress" :song-title="songTitle" />
     </Transition>
   </div>
 </template>

@@ -198,6 +198,13 @@ export class RetrowaveScene {
   public clock: Timer = new Timer()
   public mouse: Vector2 = new Vector2()
   public target: Vector2 = new Vector2()
+  // Eased mouse-look offsets (kept separate from the applied rotation so an
+  // external pitch offset can be layered on without the EMA fighting it).
+  private lookX = 0
+  private lookY = 0
+  // Extra camera pitch (radians) the host can drive — used for the intro
+  // "drop-in". Negative tilts the view down. 0 = neutral.
+  public cameraPitchOffset = 0
   public composer!: EffectComposer
 
   // Internal State
@@ -269,20 +276,39 @@ export class RetrowaveScene {
     this.scene.add(this.camera)
   }
 
-  public async prepareScene(wantAnimation = false) {
+  /**
+   * Builds the scene. `onProgress` (0..1) is reported across the build steps so
+   * callers can fold scene loading into a loading bar; a paint yield is inserted
+   * around the heavy steps so the bar actually advances on screen and the first
+   * frame is ready before gameplay is revealed.
+   */
+  public async prepareScene(wantAnimation = false, onProgress?: (p: number) => void) {
+    const report = (p: number) => onProgress?.(p)
+    const yieldFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()))
+
     this.ensureDefaultHeightTexture()
     this.autoAdjustOnResize()
     this.addControls()
     this.setPostProcessing()
     this.addSkybox()
-    await this.addSvgGraphics()
+    report(0.15)
+    await yieldFrame()
+
+    await this.addSvgGraphics() // heaviest: fetches + parses the SVG assets
+    report(0.55)
+    await yieldFrame()
+
     this.addFloor()
     this.addSidewalk()
     this.addRoad()
     this.addRoadLines()
+    report(0.78)
+    await yieldFrame()
+
     this.addPalmtrees()
     this.addGroupedPyramids()
     this.addPlayer()
+    report(1)
 
     if (wantAnimation) this.animate()
   }
@@ -1093,8 +1119,12 @@ export class RetrowaveScene {
 
     this.target.x = (1 - this.mouse.x) * 0.00065
     this.target.y = (1 - this.mouse.y) * 0.0003
-    this.camera.rotation.x += 0.05 * (this.target.y - this.camera.rotation.x)
-    this.camera.rotation.y += 0.05 * (this.target.x - this.camera.rotation.y)
+    this.lookY += 0.05 * (this.target.y - this.lookY)
+    this.lookX += 0.05 * (this.target.x - this.lookX)
+    // Mouse-look plus the intro drop-in pitch, recomposed each frame so the
+    // pitch offset doesn't accumulate through the EMA.
+    this.camera.rotation.x = this.lookY + this.cameraPitchOffset
+    this.camera.rotation.y = this.lookX
 
     this.composer.render()
   }

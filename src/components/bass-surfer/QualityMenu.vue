@@ -2,6 +2,8 @@
 import { computed, ref } from 'vue'
 import { useBassSurferStore, type QualityLevel } from '~/stores/bassSurferStore'
 import type { SceneSettings } from '~/lib/bass-surfer/sceneGenerator'
+import IconSun from '~icons/lucide/sun'
+import IconX from '~icons/lucide/x'
 
 const store = useBassSurferStore()
 
@@ -99,12 +101,7 @@ function sliderPct(s: SliderDef): number {
             : 'bg-black/40 border-white/25 text-white/80 hover:text-white hover:border-white/50'
         "
       >
-        <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-          <circle cx="12" cy="12" r="4" />
-          <path
-            d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"
-          />
-        </svg>
+        <IconSun class="w-3 h-3" />
         Zen
       </button>
     </div>
@@ -135,9 +132,7 @@ function sliderPct(s: SliderDef): number {
                 aria-label="Close custom graphics"
                 class="-mr-1 flex h-6 w-6 items-center justify-center rounded-lg text-white/50 transition-colors hover:bg-white/10 hover:text-white"
               >
-                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                  <path stroke-linecap="round" d="M6 6l12 12M18 6L6 18" />
-                </svg>
+                <IconX class="h-4 w-4" />
               </button>
             </div>
 
