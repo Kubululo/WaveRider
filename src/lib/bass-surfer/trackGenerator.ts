@@ -12,10 +12,11 @@ const GENERATOR_CONFIG = {
   BASE_WIDTH: 30,
 
   // Silent lead-in prepended before the audio-driven track: a real stretch of
-  // curving road (no beat bumps, no orbs) the player rides during the start
-  // countdown, so the music drops in seamlessly instead of the track snapping
-  // back to the beginning. Should match the countdown length in useGameEngine.
-  INTRO_SECONDS: 3,
+  // curving road (no beat bumps, no orbs) the player rides before the music
+  // drops, so it starts seamlessly instead of the track snapping to the
+  // beginning. Long enough to cover the start splash (~1.6s) plus the visible
+  // 3-2-1 countdown that follows it (see useGameEngine: splash + COUNTDOWN_FROM).
+  INTRO_SECONDS: 4.6,
 
   // 1. Thresholds (0.0 to 1.0)
   THRESHOLDS: {

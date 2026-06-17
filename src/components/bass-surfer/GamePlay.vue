@@ -24,7 +24,7 @@ const props = defineProps<{
   zenMode?: boolean
 }>()
 
-const emit = defineEmits(['close', 'ready', 'prepareProgress'])
+const emit = defineEmits(['close', 'ready', 'prepareProgress', 'startIntro'])
 
 const canvasRef = ref<HTMLDivElement | null>(null)
 const shareModal = ref<InstanceType<typeof ShareScoreModal> | null>(null)
@@ -41,6 +41,7 @@ const {
   currentTimeDisplay,
   touchFlash,
   countdown,
+  songStarted,
   score,
   displayScore,
   showDebug,
@@ -62,6 +63,17 @@ function closeGame() {
   cleanup()
   emit('close')
 }
+
+// Play the WaveRider wordmark splash as the run begins — it masks the camera's
+// jump to the high drop-in start, then dissolves to reveal the descent.
+function onStart() {
+  emit('startIntro')
+  startGame()
+}
+function onRestart() {
+  emit('startIntro')
+  restartGame()
+}
 </script>
 
 <template>
@@ -75,7 +87,7 @@ function closeGame() {
     />
 
     <TouchControls
-      v-if="isTouchDevice && isPlaying && !gameEnded && !isPaused"
+      v-if="isTouchDevice && isPlaying && songStarted && !gameEnded && !isPaused"
       :touch-flash="touchFlash"
       @move="moveLane"
     />
@@ -101,21 +113,25 @@ function closeGame() {
       :show-debug="showDebug"
       :has-analysis="!!analysis"
       @resume="resumeGame"
-      @restart="restartGame"
+      @restart="onRestart"
       @exit="closeGame"
       @toggle-debug="showDebug = !showDebug"
     />
 
-    <ResultsScreen
-      v-if="!isPlaying"
-      :game-ended="gameEnded"
-      :score="score"
-      :track-name="trackName"
-      :zen-mode="zenMode"
-      @start="startGame"
-      @share="shareModal?.open()"
-      @close="closeGame"
-    />
+    <!-- The start/finish menu doubles as the "page intro": on Start it fades out
+         to reveal the camera dropping into place. -->
+    <Transition name="screen-fade">
+      <ResultsScreen
+        v-if="!isPlaying"
+        :game-ended="gameEnded"
+        :score="score"
+        :track-name="trackName"
+        :zen-mode="zenMode"
+        @start="onStart"
+        @share="shareModal?.open()"
+        @close="closeGame"
+      />
+    </Transition>
 
     <ShareScoreModal
       ref="shareModal"
@@ -129,3 +145,17 @@ function closeGame() {
     <RotateDevicePrompt v-if="isMobile && isPortrait" />
   </div>
 </template>
+
+<style scoped>
+/* Start menu fades out on Start, revealing the camera drop behind it. */
+.screen-fade-leave-active {
+  transition: opacity 0.5s ease;
+}
+.screen-fade-enter-active {
+  transition: opacity 0.3s ease;
+}
+.screen-fade-enter-from,
+.screen-fade-leave-to {
+  opacity: 0;
+}
+</style>

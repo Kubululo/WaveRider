@@ -18,7 +18,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <GameOverlay>
+  <GameOverlay solid>
     <WaveRiderMark class="mb-6" />
 
     <h2

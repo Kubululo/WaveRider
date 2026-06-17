@@ -13,7 +13,7 @@ const emit = defineEmits<{ pause: [] }>()
 
 <template>
   <FrostedGlass
-    container-class="fixed bottom-4 z-[99999] h-14 max-w-4xl w-full left-1/2 -translate-x-1/2"
+    container-class="fixed bottom-4 z-[90] h-14 max-w-4xl w-full left-1/2 -translate-x-1/2"
     class="flex items-center justify-between px-5 border border-white/10"
   >
     <div class="shrink-0 text-white/90 font-mono text-lg font-bold tabular-nums">

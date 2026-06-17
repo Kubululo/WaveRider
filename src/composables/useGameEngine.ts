@@ -45,7 +45,15 @@ export interface GameEngineHooks {
 const COUNTDOWN_FROM = 3
 // Quick fade so the music doesn't pop in at the end of the lead-in (and again on
 // resume).
-const MUSIC_FADE_IN = 0.2
+const MUSIC_FADE_IN = 1.5
+
+// Intro camera drop-in: how far above/behind the resting pose the camera starts,
+// how far it pitches down to look at the track while up there, and how long the
+// descent takes (revealed as the start splash dissolves).
+const CAMERA_DROP_HEIGHT = 18
+const CAMERA_DROP_BACK = 24
+const CAMERA_DROP_PITCH = 0.4
+const CAMERA_DROP_SEC = 2
 
 /**
  * The playable core of WaveRider: owns the Three.js scene, the audio clock, the
@@ -70,6 +78,9 @@ export function useGameEngine(
   const touchFlash = ref<'left' | 'right' | null>(null)
   // Pre-roll countdown: null when idle, else the number on screen (3 → 1).
   const countdown = ref<number | null>(null)
+  // True once the music has actually started (the intro splash + countdown are
+  // over). Gates the HUD and player input so neither shows during the intro.
+  const songStarted = ref(false)
 
   const score = ref<GameScore>({
     score: 0,
@@ -110,6 +121,10 @@ export function useGameEngine(
   let rafId = 0
   let touchFlashTimer: ReturnType<typeof setTimeout> | null = null
   let countdownTimer: ReturnType<typeof setTimeout> | null = null
+  // Resting camera height/depth, captured once the scene is built; the drop-in
+  // animates from above/behind these back to them.
+  let restCamY = 3
+  let restCamZ = 10.5
 
   function clearCountdown() {
     if (countdownTimer) {
@@ -137,7 +152,8 @@ export function useGameEngine(
   }
 
   function moveLane(delta: -1 | 1) {
-    if (isPaused.value || !isPlaying.value || countdown.value !== null) return
+    // Locked through the whole intro (splash + countdown) until the song starts.
+    if (isPaused.value || !isPlaying.value || !songStarted.value) return
     currentLane.value = Math.max(-1, Math.min(1, currentLane.value + delta))
 
     touchFlash.value = delta < 0 ? 'left' : 'right'
@@ -198,6 +214,19 @@ export function useGameEngine(
         progress = Math.min(1, elapsed / totalDuration)
         lastProgress = progress
 
+        // Intro phase: the splash covers the first stretch, then the visible
+        // 3-2-1 plays over the remaining lead-in (it's keyed off the clock, so it
+        // can't show until the splash is long gone). Music + HUD arrive at the seam.
+        if (!songStarted.value) {
+          if (songTime >= 0) {
+            songStarted.value = true
+            countdown.value = null
+          } else {
+            const remaining = -songTime // seconds until the music drops
+            countdown.value = remaining <= COUNTDOWN_FROM ? Math.max(1, Math.ceil(remaining)) : null
+          }
+        }
+
         if (showDebug.value && songTime >= 0) {
           fpsFrameCount++
           const now = performance.now()
@@ -241,6 +270,22 @@ export function useGameEngine(
       // Ease the camera toward the gameplay FOV (wider than the menu default)
       sceneManager.camera.fov += (BASE_FOV - sceneManager.camera.fov) * 0.1
       sceneManager.camera.updateProjectionMatrix()
+
+      // Cinematic drop-in: at the start of a run the camera eases down from high
+      // and far (looking down at the track) to its resting pose over the lead-in
+      // minus a beat. Keyed off the persistent track position (not the per-frame
+      // `elapsed`, which is 0 while paused) so pausing mid-song never lifts the
+      // camera — only the genuine song start near progress 0 triggers the drop.
+      let dropE = 1
+      if (isPlaying.value && CAMERA_DROP_SEC > 0) {
+        const trackElapsed = progress * totalDuration
+        const t = Math.min(1, trackElapsed / CAMERA_DROP_SEC)
+        dropE = 1 - Math.pow(1 - t, 3) // easeOutCubic
+      }
+      const rise = 1 - dropE
+      sceneManager.camera.position.y = restCamY + rise * CAMERA_DROP_HEIGHT
+      sceneManager.camera.position.z = restCamZ + rise * CAMERA_DROP_BACK
+      sceneManager.cameraPitchOffset = -rise * CAMERA_DROP_PITCH
     }
 
     const targetX = currentLane.value * LANE_WIDTH
@@ -356,6 +401,8 @@ export function useGameEngine(
 
     lastProgress = 0
     lastScrollOffset = 0
+    songStarted.value = false
+    clearCountdown()
 
     sourceNode.onended = () => {
       if (isPlaying.value && !gameEnded.value) endGame()
@@ -368,9 +415,8 @@ export function useGameEngine(
     isPlaying.value = true
     gameEnded.value = false
     isPaused.value = false
-
-    // Visual count over the silent intro, ending as the audio drops.
-    runCountdown(introDuration, () => {})
+    // The 3-2-1 countdown is driven by the track clock in tick() (so it appears
+    // only after the start splash), and the music is already scheduled above.
   }
 
   function endGame() {
@@ -388,7 +434,8 @@ export function useGameEngine(
   }
 
   function togglePause() {
-    if (!isPlaying.value || gameEnded.value || countdown.value !== null) return
+    // No pausing during the intro; resumeGame guards its own re-entry countdown.
+    if (!isPlaying.value || gameEnded.value || !songStarted.value) return
     if (isPaused.value) {
       resumeGame()
     } else {
@@ -424,6 +471,7 @@ export function useGameEngine(
 
   function restartGame() {
     clearCountdown()
+    songStarted.value = false
     isPaused.value = false
     isPlaying.value = false
     gameEnded.value = false
@@ -483,6 +531,9 @@ export function useGameEngine(
         sceneManager.latency = 0.0
       }
 
+      restCamY = sceneManager.camera.position.y
+      restCamZ = sceneManager.camera.position.z
+
       await sceneManager.prepareScene(false, hooks.onProgress)
 
       if (opts.trackData.segments && !opts.zenMode) {
@@ -517,6 +568,7 @@ export function useGameEngine(
     currentLane,
     touchFlash,
     countdown,
+    songStarted,
     score,
     displayScore,
     showDebug,

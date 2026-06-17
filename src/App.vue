@@ -89,7 +89,7 @@ onUnmounted(() => {
     <Transition name="dissolve">
       <div
         v-if="!introDone"
-        class="pointer-events-none fixed inset-0 z-[60] flex items-center justify-center overflow-hidden px-6 bg-[linear-gradient(180deg,#11052a_0%,#2a0a4e_55%,#06010c_100%)]"
+        class="pointer-events-none fixed inset-0 z-[100] flex items-center justify-center overflow-hidden px-6 bg-[linear-gradient(180deg,#11052a_0%,#2a0a4e_55%,#06010c_100%)]"
       >
         <!-- Soft glow behind the wordmark -->
         <div
@@ -194,6 +194,7 @@ onUnmounted(() => {
         @close="handleGameClose"
         @ready="gameReady = true"
         @prepare-progress="prepareProgress = $event"
+        @start-intro="playIntro"
       />
     </Transition>
 

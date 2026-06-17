@@ -1,14 +1,25 @@
 <script setup lang="ts">
 // Shared full-screen overlay for the start / pause / end screens: App.vue's
-// deep-purple gradient + soft pink glow behind a frosted, animated card. The
-// gradient is slightly translucent so the live scene stays faintly visible.
-withDefaults(defineProps<{ zClass?: string }>(), { zClass: 'z-50' })
+// deep-purple gradient + soft pink glow behind a frosted, animated card.
+//   - `solid` (start/finish): fully opaque gradient — a page-intro screen, the
+//     scene is hidden until this fades out.
+//   - default (pause): slightly translucent so the frozen scene stays faintly
+//     visible behind it.
+withDefaults(defineProps<{ zClass?: string; solid?: boolean }>(), {
+  zClass: 'z-50',
+  solid: false,
+})
 </script>
 
 <template>
   <div
-    class="absolute inset-0 flex items-center justify-center overflow-hidden px-6 backdrop-blur-md bg-[linear-gradient(180deg,rgba(17,5,42,0.94)_0%,rgba(42,10,78,0.88)_55%,rgba(6,1,12,0.96)_100%)]"
-    :class="zClass"
+    class="absolute inset-0 flex items-center justify-center overflow-hidden px-6 backdrop-blur-md"
+    :class="[
+      zClass,
+      solid
+        ? 'bg-[linear-gradient(180deg,#11052a_0%,#2a0a4e_55%,#06010c_100%)]'
+        : 'bg-[linear-gradient(180deg,rgba(17,5,42,0.94)_0%,rgba(42,10,78,0.88)_55%,rgba(6,1,12,0.96)_100%)]',
+    ]"
   >
     <!-- Soft pink glow behind the card -->
     <div
