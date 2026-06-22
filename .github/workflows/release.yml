@@ -90,7 +90,7 @@ jobs:
           echo "zip=$PKG.zip" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.bump.outputs.tag }}
           name: WaveRider ${{ steps.bump.outputs.tag }}
