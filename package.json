@@ -21,14 +21,14 @@
   },
   "dependencies": {
     "pinia": "^3.0.4",
-    "three": "^0.184.0",
+    "three": "^0.185.0",
     "vue": "^3.5.38"
   },
   "devDependencies": {
     "@iconify-json/lucide": "^1.2.113",
     "@iconify-json/simple-icons": "^1.2.86",
     "@tailwindcss/vite": "^4.1.18",
-    "@types/three": "^0.184.1",
+    "@types/three": "^0.185.0",
     "@vitejs/plugin-vue": "^6.0.7",
     "@vue/eslint-config-prettier": "^10.2.0",
     "@vue/eslint-config-typescript": "^14.8.0",
